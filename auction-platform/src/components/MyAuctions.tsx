@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -30,7 +30,14 @@ import {
   Tooltip,
   Divider,
   TextField,
+  CircularProgress,
+  Pagination,
 } from '@mui/material';
+import { itemsApi, bidsApi } from '../api';
+import type { Item, Bid as ApiBid, BidSummary } from '../api/types';
+import { getErrorMessage } from '../utils/errorHandling';
+import { getAuctionImage } from '../utils/imageUtils';
+import { convertToStarRating, formatRating } from '../utils/ratingUtils';
 import {
   Gavel,
   Edit,
@@ -45,6 +52,18 @@ import {
   CheckCircle,
   Cancel,
 } from '@mui/icons-material';
+
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5005';
+
+
+
+const getImageUrl = (imagePath: string, categories?: Array<{name: string; id: number}>, auctionId?: number): string => {
+  if (!imagePath) {
+    return categories ? getAuctionImage([], categories, auctionId) : getAuctionImage([], [], auctionId);
+  }
+  if (imagePath.startsWith('http')) return imagePath; // Already absolute URL
+  return `${API_BASE_URL}${imagePath}`;
+};
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -68,7 +87,7 @@ function TabPanel(props: TabPanelProps) {
 }
 
 interface MyAuction {
-  id: string;
+  id: number;
   itemName: string;
   description: string;
   category: string;
@@ -108,6 +127,7 @@ interface UserBid {
 
 interface WonAuction {
   id: string;
+  itemId: number;
   itemName: string;
   finalPrice: number;
   endDate: string;
@@ -119,147 +139,39 @@ interface AuctionBids {
   [auctionId: string]: Bid[];
 }
 
-// Mock data
-const mockMyAuctions: MyAuction[] = [
-  {
-    id: '1',
-    itemName: 'Vintage Camera Collection - Rare 1960s Leica',
-    description: 'Exceptional vintage camera collection in excellent condition...',
-    category: 'Electronics',
-    images: ['https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=400'],
-    currentPrice: 1250,
-    startingPrice: 500,
-    buyNowPrice: 2500,
-    bidCount: 15,
-    timeRemaining: '2d 14h 30m',
-    status: 'active',
-    endDate: new Date(Date.now() + 2.5 * 24 * 60 * 60 * 1000),
-    views: 89,
-    watchers: 12,
-    location: 'New York, NY'
-  },
-  {
-    id: '2',
-    itemName: 'Gaming Console Bundle with Games',
-    description: 'Complete gaming setup with controller and popular games...',
-    category: 'Electronics',
-    images: ['https://images.unsplash.com/photo-1486401899868-0e435edeabfa?w=400'],
-    currentPrice: 520,
-    startingPrice: 300,
-    bidCount: 22,
-    timeRemaining: '5h 15m',
-    status: 'active',
-    endDate: new Date(Date.now() + 5.25 * 60 * 60 * 1000),
-    views: 156,
-    watchers: 28,
-    location: 'New York, NY'
-  },
-  {
-    id: '3',
-    itemName: 'Professional Camera Lens',
-    description: 'High-quality lens for professional photography...',
-    category: 'Electronics',
-    images: ['https://images.unsplash.com/photo-1606983340126-99ab4feaa64a?w=400'],
-    currentPrice: 850,
-    startingPrice: 400,
-    buyNowPrice: 1200,
-    bidCount: 8,
-    timeRemaining: 'Ended',
-    status: 'ended',
-    endDate: new Date(Date.now() - 24 * 60 * 60 * 1000),
-    views: 67,
-    watchers: 15,
-    location: 'New York, NY'
-  },
-  {
-    id: '4',
-    itemName: 'Vintage Vinyl Record Collection',
-    description: 'Rare jazz and rock records from the 70s and 80s...',
-    category: 'Music',
-    images: ['https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400'],
-    currentPrice: 0,
-    startingPrice: 200,
-    bidCount: 0,
-    timeRemaining: 'Draft',
-    status: 'draft',
-    endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    views: 0,
-    watchers: 0,
-    location: 'New York, NY'
-  }
-];
+// Helper function to calculate time remaining
+const calculateTimeRemaining = (endDate: string, status: string): string => {
+  if (status === 'draft') return 'Not started';
+  if (status === 'ended') return 'Ended';
 
-const mockBids: AuctionBids = {
-  '1': [
-    { id: '1', bidderUsername: 'PhotoEnthusiast', amount: 1250, time: '2 minutes ago', rating: 4.9, isWinning: true },
-    { id: '2', bidderUsername: 'CameraLover', amount: 1200, time: '15 minutes ago', rating: 4.7, isWinning: false },
-    { id: '3', bidderUsername: 'VintageHunter', amount: 1150, time: '1 hour ago', rating: 4.5, isWinning: false },
-  ],
-  '2': [
-    { id: '4', bidderUsername: 'GamerPro', amount: 520, time: '5 minutes ago', rating: 4.8, isWinning: true },
-    { id: '5', bidderUsername: 'ConsoleCollector', amount: 500, time: '30 minutes ago', rating: 4.6, isWinning: false },
-  ],
-  '3': [
-    { id: '6', bidderUsername: 'LensExpert', amount: 850, time: '1 day ago', rating: 4.9, isWinning: true },
-  ]
+  // Validate the date string
+  if (!endDate) return 'Invalid date';
+
+  const end = new Date(endDate);
+  const now = new Date();
+
+  // Check if date is valid
+  // if (isNaN(end.getTime()) || isNaN(now.getTime())) {
+  //   return 'Invalid date';
+  // }
+
+  const diff = end.getTime() - now.getTime();
+
+  if (diff <= 0) return 'Ended';
+
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+  // Validate calculations
+  if (isNaN(days) || isNaN(hours) || isNaN(minutes)) {
+    return 'Invalid time';
+  }
+
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 };
-
-// Mock data for user's bids
-const mockUserBids: UserBid[] = [
-  {
-    id: '1',
-    auctionId: '5',
-    auctionName: 'Antique Watch Collection',
-    amount: 850,
-    time: '2 hours ago',
-    isWinning: true,
-    isEnded: false,
-    currentPrice: 850,
-    imageUrl: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400'
-  },
-  {
-    id: '2',
-    auctionId: '6',
-    auctionName: 'Classic Guitar',
-    amount: 1200,
-    time: '1 day ago',
-    isWinning: false,
-    isEnded: false,
-    currentPrice: 1350,
-    imageUrl: 'https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=400'
-  },
-  {
-    id: '3',
-    auctionId: '7',
-    auctionName: 'Vintage Motorcycle',
-    amount: 5000,
-    time: '3 days ago',
-    isWinning: false,
-    isEnded: true,
-    currentPrice: 5500,
-    imageUrl: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400'
-  }
-];
-
-// Mock data for won auctions
-const mockWonAuctions: WonAuction[] = [
-  {
-    id: '1',
-    itemName: 'Professional Camera Kit',
-    finalPrice: 2250,
-    endDate: '2 days ago',
-    sellerUsername: 'PhotoPro',
-    imageUrl: 'https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=400'
-  },
-  {
-    id: '2',
-    itemName: 'Limited Edition Sneakers',
-    finalPrice: 450,
-    endDate: '1 week ago',
-    sellerUsername: 'SneakerHead',
-    imageUrl: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?w=400'
-  }
-];
 
 const MyAuctions: React.FC = () => {
   const navigate = useNavigate();
@@ -269,40 +181,250 @@ const MyAuctions: React.FC = () => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [auctionToDelete, setAuctionToDelete] = useState<MyAuction | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [myAuctions, setMyAuctions] = useState<MyAuction[]>([]);
+  const [myBids, setMyBids] = useState<UserBid[]>([]);
+  const [wonAuctions, setWonAuctions] = useState<WonAuction[]>([]);
+  const [auctionBids, setAuctionBids] = useState<{ [key: number]: BidSummary[] }>({});
 
-  const activeAuctions = mockMyAuctions.filter(a => a.status === 'active');
-  const endedAuctions = mockMyAuctions.filter(a => a.status === 'ended');
-  const draftAuctions = mockMyAuctions.filter(a => a.status === 'draft');
+  // Pagination state
+  const [activePage, setActivePage] = useState(1);
+  const [endedPage, setEndedPage] = useState(1);
+  const [draftPage, setDraftPage] = useState(1);
+  const itemsPerPage = 6;
+
+  // Treat draft and active as one unified "active" status
+  const activeAuctions = myAuctions.filter(a => a.status === 'active' || a.status === 'draft');
+  const endedAuctions = myAuctions.filter(a => a.status === 'ended');
+  // Keep drafts separate for tab display
+  const draftAuctions = myAuctions.filter(a => a.status === 'draft');
+
+  // Pagination helpers
+  const getPaginatedData = (data: MyAuction[], page: number) => {
+    const startIndex = (page - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return data.slice(startIndex, endIndex);
+  };
+
+  const getTotalPages = (total: number) => Math.ceil(total / itemsPerPage);
+
+  // Paginated data
+  const paginatedActiveAuctions = getPaginatedData(activeAuctions, activePage);
+  const paginatedEndedAuctions = getPaginatedData(endedAuctions, endedPage);
+  const paginatedDraftAuctions = getPaginatedData(draftAuctions, draftPage);
+
+  // Fetch user's auction data
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const [myItems, userBids, winningBids] = await Promise.all([
+        itemsApi.getMyItems(),
+        bidsApi.getMyBids(),
+        bidsApi.getMyWinningBids()
+      ]);
+
+      console.log('Raw userBids data:', userBids);
+      console.log('Raw winningBids data:', winningBids);
+
+      // Transform API items to MyAuction format
+      const transformedAuctions: MyAuction[] = myItems.map(item => ({
+        id: item.id,
+        itemName: item.name,
+        description: item.description || '',
+        category: item.categories.length > 0 ? item.categories[0].name : 'Uncategorized',
+        images: item.images || ['https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=400'],
+        currentPrice: item.currently,
+        startingPrice: item.first_bid,
+        buyNowPrice: item.buy_price,
+        bidCount: item.number_of_bids,
+        timeRemaining: calculateTimeRemaining(item.ends, item.status),
+        status: item.status,
+        endDate: new Date(item.ends),
+        views: 0, // Not available in API
+        watchers: 0, // Not available in API
+        location: item.location || 'Unknown'
+      }));
+
+      // Create a set of winning bid IDs for quick lookup
+      const winningBidIds = new Set(winningBids.map(bid => bid.id));
+
+      // Get unique item IDs from all bids to fetch item data if missing
+      const allItemIds = Array.from(new Set([...userBids.map(bid => bid.item_id), ...winningBids.map(bid => bid.item_id)]));
+
+      // Check if we have item data, if not fetch it
+      const itemsData: Record<number, any> = {};
+
+      for (const bid of [...userBids, ...winningBids]) {
+        if (bid.item && bid.item.name) {
+          itemsData[bid.item_id] = bid.item;
+        }
+      }
+
+      // Fetch missing item data
+      const missingItemIds = allItemIds.filter(id => !itemsData[id]);
+      if (missingItemIds.length > 0) {
+        console.log('Fetching missing item data for IDs:', missingItemIds);
+        const itemPromises = missingItemIds.map(id => itemsApi.getItem(id).catch(err => {
+          console.error(`Failed to fetch item ${id}:`, err);
+          return null;
+        }));
+        const fetchedItems = await Promise.all(itemPromises);
+
+        fetchedItems.forEach((item, index) => {
+          if (item) {
+            itemsData[missingItemIds[index]] = item;
+          }
+        });
+      }
+
+      // Group bids by item and get the highest bid for each item
+      const bidsByItem = userBids.reduce((acc, bid) => {
+        const itemId = bid.item_id.toString();
+        if (!acc[itemId] || acc[itemId].amount < bid.amount) {
+          acc[itemId] = bid;
+        }
+        return acc;
+      }, {} as Record<string, typeof userBids[0]>);
+
+      // Transform API bids to UserBid format (only highest bid per item)
+      const transformedMyBids: UserBid[] = Object.values(bidsByItem).map(bid => {
+        // A bid is winning if it's in the winning bids list from the API
+        const isWinning = winningBidIds.has(bid.id);
+        const itemData = itemsData[bid.item_id];
+
+        return {
+          id: bid.id.toString(),
+          auctionId: bid.item_id.toString(),
+          auctionName: itemData?.name || bid.item?.name || `Item #${bid.item_id}`,
+          amount: bid.amount,
+          time: new Date(bid.time).toLocaleString(),
+          isWinning: isWinning,
+          isEnded: itemData?.status === 'ended' || bid.item?.status === 'ended',
+          currentPrice: itemData?.currently || bid.item?.currently || bid.amount,
+          imageUrl: getImageUrl(
+            (itemData?.images || bid.item?.images || [])[0] || '',
+            itemData?.categories || bid.item?.categories || [],
+            itemData?.id || bid.item?.id
+          )
+        };
+      });
+
+      const transformedWonAuctions: WonAuction[] = winningBids.map(bid => {
+        const itemData = itemsData[bid.item_id];
+        return {
+          id: bid.id.toString(),
+          itemId: itemData?.id || bid.item?.id || bid.item_id,
+          itemName: itemData?.name || bid.item?.name || `Item #${bid.item_id}`,
+          finalPrice: bid.amount,
+          endDate: new Date(bid.time).toLocaleDateString(),
+          sellerUsername: itemData?.seller?.username || bid.item?.seller?.username || 'Unknown',
+          imageUrl: getImageUrl(
+            (itemData?.images || bid.item?.images || [])[0] || '',
+            itemData?.categories || bid.item?.categories || [],
+            itemData?.id || bid.item?.id || bid.item_id
+          )
+        };
+      });
+
+      setMyAuctions(transformedAuctions);
+      setMyBids(transformedMyBids);
+      setWonAuctions(transformedWonAuctions);
+    } catch (error: any) {
+      console.error('Failed to fetch auction data:', error);
+      setAlert({ type: 'error', message: 'Failed to load auction data. Please try again.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
 
-  const handleViewBids = (auction: MyAuction) => {
-    setSelectedAuction(auction);
-    setShowBidsDialog(true);
+  const handleViewBids = async (auction: MyAuction) => {
+    try {
+      const bids = await bidsApi.getItemBids(auction.id);
+      setAuctionBids(prev => ({ ...prev, [auction.id]: bids }));
+      setSelectedAuction(auction);
+      setShowBidsDialog(true);
+    } catch (error: any) {
+      setAlert({ type: 'error', message: 'Failed to load bids.' });
+    }
+  };
+
+  const handleStartAuction = async (auctionId: number) => {
+    try {
+      await itemsApi.startAuction(auctionId);
+      setAlert({ type: 'success', message: 'Auction started successfully!' });
+      // Refresh the auctions list to update status
+      await fetchData();
+      setTimeout(() => setAlert(null), 3000);
+    } catch (error: any) {
+      const errorMessage = getErrorMessage(error);
+      setAlert({ type: 'error', message: errorMessage });
+    }
+  };
+
+  // These handlers are now defined below in the updated section
+
+  const confirmDelete = async () => {
+    if (auctionToDelete) {
+      try {
+        await itemsApi.deleteItem(auctionToDelete.id);
+        setMyAuctions(prev => prev.filter(a => a.id !== auctionToDelete.id));
+        setAlert({ type: 'success', message: `Auction "${auctionToDelete.itemName}" deleted successfully.` });
+        setShowDeleteDialog(false);
+        setAuctionToDelete(null);
+        setTimeout(() => setAlert(null), 3000);
+      } catch (error: any) {
+        setAlert({ type: 'error', message: 'Failed to delete auction. Please try again.' });
+      }
+    }
+  };
+
+  // Helper functions to determine if auction can be edited or deleted
+  const canEditAuction = (auction: MyAuction): boolean => {
+    // Can only edit if there are no bids and auction hasn't started (status is 'draft')
+    return auction.bidCount === 0 && auction.status === 'draft';
+  };
+
+  const canDeleteAuction = (auction: MyAuction): boolean => {
+    // Can only delete if there are no bids and auction hasn't started (status is 'draft')
+    return auction.bidCount === 0 && auction.status === 'draft';
+  };
+
+  // Updated handlers with validation
+  const handleEditAuction = (auction: MyAuction) => {
+    if (!canEditAuction(auction)) {
+      setAlert({ 
+        type: 'error', 
+        message: 'Cannot edit auction that has bids or has already started.' 
+      });
+      setTimeout(() => setAlert(null), 5000);
+      return;
+    }
+    console.log('Edit auction clicked:', auction.id);
+    navigate(`/edit/${auction.id}`);
   };
 
   const handleDeleteAuction = (auction: MyAuction) => {
+    if (!canDeleteAuction(auction)) {
+      setAlert({ 
+        type: 'error', 
+        message: 'Cannot delete auction that has bids or has already started.' 
+      });
+      setTimeout(() => setAlert(null), 5000);
+      return;
+    }
+    console.log('Delete auction clicked:', auction.id);
     setAuctionToDelete(auction);
     setShowDeleteDialog(true);
   };
 
-  const confirmDelete = () => {
-    if (auctionToDelete) {
-      setAlert({ type: 'success', message: `Auction "${auctionToDelete.itemName}" deleted successfully.` });
-      setShowDeleteDialog(false);
-      setAuctionToDelete(null);
-
-      // Auto-hide alert
-      setTimeout(() => setAlert(null), 3000);
-    }
-  };
-
-  const handleEditAuction = (auction: MyAuction) => {
-    // Navigate to edit page with auction ID
-    navigate(`/edit/${auction.id}`);
-  };
 
 
   const getStatusColor = (status: string) => {
@@ -318,15 +440,42 @@ const MyAuctions: React.FC = () => {
     switch (status) {
       case 'active': return <CheckCircle />;
       case 'ended': return <Cancel />;
-      case 'draft': return <Edit />;
+      case 'draft': return <Schedule />;
       default: return <Schedule />;
     }
   };
 
-  const formatTimeRemaining = (timeRemaining: string, status: string) => {
+  const formatTimeRemaining = (endDate: string, status: string): string => {
     if (status === 'ended') return 'Ended';
     if (status === 'draft') return 'Not started';
-    return timeRemaining;
+
+    // Validate the date string
+    if (!endDate) return 'Invalid date';
+
+    const now = new Date();
+    const end = new Date(endDate);
+
+    // Check if date is valid
+    if (isNaN(end.getTime()) || isNaN(now.getTime())) {
+      return 'Invalid date';
+    }
+
+    const diff = end.getTime() - now.getTime();
+
+    if (diff <= 0) return 'Ended';
+
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+    // Validate calculations
+    if (isNaN(days) || isNaN(hours) || isNaN(minutes)) {
+      return 'Invalid time';
+    }
+
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
   };
 
   const renderAuctionGrid = (auctions: MyAuction[]) => (
@@ -334,12 +483,14 @@ const MyAuctions: React.FC = () => {
       {auctions.map((auction) => (
         <Grid item xs={12} sm={6} md={4} key={auction.id}>
           <Card
+            onClick={() => navigate(`/auction/${auction.id}`)}
             sx={{
               height: '100%',
               display: 'flex',
               flexDirection: 'column',
               borderRadius: '1rem',
               transition: 'all 0.3s ease',
+              cursor: 'pointer',
               '&:hover': {
                 transform: 'translateY(-4px)',
                 boxShadow: '0 8px 25px rgba(0, 0, 0, 0.15)',
@@ -350,7 +501,7 @@ const MyAuctions: React.FC = () => {
               <CardMedia
                 component="img"
                 height="200"
-                image={auction.images[0]}
+                image={getImageUrl(auction.images && auction.images.length > 0 ? auction.images[0] : '', [{ name: auction.category, id: 0 }], auction.id)}
                 alt={auction.itemName}
                 sx={{ objectFit: 'cover' }}
               />
@@ -368,6 +519,23 @@ const MyAuctions: React.FC = () => {
                   fontWeight: 500,
                 }}
               />
+
+              {/* Edit/Delete Status Badge */}
+              {!canEditAuction(auction) && !canDeleteAuction(auction) && auction.bidCount > 0 && (
+                <Chip
+                  label="Has Bids"
+                  color="warning"
+                  size="small"
+                  sx={{
+                    position: 'absolute',
+                    top: '0.75rem',
+                    right: '0.75rem',
+                    fontWeight: 500,
+                    backgroundColor: '#ff9800',
+                    color: 'white',
+                  }}
+                />
+              )}
 
               {/* Stats Badge */}
               <Box
@@ -432,9 +600,7 @@ const MyAuctions: React.FC = () => {
               {/* Time Remaining */}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: '0.5rem', mb: '1rem' }}>
                 <AccessTime fontSize="small" color="warning" />
-                <Typography variant="body2" color="warning.main" fontWeight={500}>
-                  {formatTimeRemaining(auction.timeRemaining, auction.status)}
-                </Typography>
+
               </Box>
 
               {/* Action Buttons */}
@@ -445,19 +611,41 @@ const MyAuctions: React.FC = () => {
                       variant="outlined"
                       size="small"
                       startIcon={<Visibility />}
-                      onClick={() => handleViewBids(auction)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleViewBids(auction);
+                      }}
                       sx={{ flex: 1 }}
                     >
                       View Bids
                     </Button>
-                    <Tooltip title="Edit Auction">
-                      <IconButton
-                        size="small"
-                        onClick={() => handleEditAuction(auction)}
-                        color="primary"
-                      >
-                        <Edit />
-                      </IconButton>
+                    <Tooltip 
+                      title={
+                        canEditAuction(auction) 
+                          ? "Edit Auction" 
+                          : "Cannot edit: Auction has bids or has started"
+                      }
+                    >
+                      <span>
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditAuction(auction);
+                          }}
+                          color="primary"
+                          disabled={!canEditAuction(auction)}
+                          sx={{ 
+                            opacity: canEditAuction(auction) ? 1 : 0.4,
+                            '&:disabled': { 
+                              color: 'text.disabled',
+                              cursor: 'not-allowed'
+                            }
+                          }}
+                        >
+                          <Edit />
+                        </IconButton>
+                      </span>
                     </Tooltip>
                   </>
                 )}
@@ -469,17 +657,40 @@ const MyAuctions: React.FC = () => {
                       size="small"
                       startIcon={<Gavel />}
                       sx={{ flex: 1 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleStartAuction(auction.id);
+                      }}
                     >
                       Start Auction
                     </Button>
-                    <Tooltip title="Edit">
-                      <IconButton
-                        size="small"
-                        color="primary"
-                        onClick={() => handleEditAuction(auction)}
-                      >
-                        <Edit />
-                      </IconButton>
+                    <Tooltip 
+                      title={
+                        canEditAuction(auction) 
+                          ? "Edit Auction" 
+                          : "Cannot edit: Auction has bids or has started"
+                      }
+                    >
+                      <span>
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditAuction(auction);
+                          }}
+                          disabled={!canEditAuction(auction)}
+                          sx={{ 
+                            opacity: canEditAuction(auction) ? 1 : 0.4,
+                            '&:disabled': { 
+                              color: 'text.disabled',
+                              cursor: 'not-allowed'
+                            }
+                          }}
+                        >
+                          <Edit />
+                        </IconButton>
+                      </span>
                     </Tooltip>
                   </>
                 )}
@@ -489,22 +700,51 @@ const MyAuctions: React.FC = () => {
                     variant="outlined"
                     size="small"
                     startIcon={<Visibility />}
-                    onClick={() => handleViewBids(auction)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleViewBids(auction);
+                    }}
                     sx={{ flex: 1 }}
                   >
                     Final Results
                   </Button>
                 )}
 
-                {(auction.status === 'draft' || auction.status === 'ended') && (
-                  <Tooltip title="Delete">
+                {/* Delete button - only show if auction can be deleted */}
+                {canDeleteAuction(auction) && (
+                  <Tooltip title="Delete Auction">
                     <IconButton
                       size="small"
                       color="error"
-                      onClick={() => handleDeleteAuction(auction)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteAuction(auction);
+                      }}
                     >
                       <Delete />
                     </IconButton>
+                  </Tooltip>
+                )}
+
+                {/* Show disabled delete button with tooltip for non-deletable auctions */}
+                {!canDeleteAuction(auction) && (auction.status === 'draft' || auction.status === 'ended') && (
+                  <Tooltip title="Cannot delete: Auction has bids or has started">
+                    <span>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        disabled={true}
+                        sx={{ 
+                          opacity: 0.4,
+                          '&:disabled': { 
+                            color: 'text.disabled',
+                            cursor: 'not-allowed'
+                          }
+                        }}
+                      >
+                        <Delete />
+                      </IconButton>
+                    </span>
                   </Tooltip>
                 )}
               </Box>
@@ -514,6 +754,19 @@ const MyAuctions: React.FC = () => {
       ))}
     </Grid>
   );
+
+  if (loading) {
+    return (
+      <Container maxWidth="xl">
+        <Box sx={{ py: '2rem', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+          <CircularProgress size={60} />
+          <Typography variant="h6" sx={{ ml: '1rem' }}>
+            Loading your auctions...
+          </Typography>
+        </Box>
+      </Container>
+    );
+  }
 
   return (
     <Container maxWidth="xl">
@@ -555,7 +808,7 @@ const MyAuctions: React.FC = () => {
             <Card sx={{ borderRadius: '1rem', textAlign: 'center', p: '1rem' }}>
               <TrendingUp color="primary" sx={{ fontSize: '2rem', mb: '0.5rem' }} />
               <Typography variant="h4" fontWeight={700} color="primary.main">
-                ${mockMyAuctions.reduce((sum, a) => sum + a.currentPrice, 0).toLocaleString()}
+                ${myAuctions.reduce((sum, a) => sum + a.currentPrice, 0).toLocaleString()}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Total Value
@@ -566,7 +819,7 @@ const MyAuctions: React.FC = () => {
             <Card sx={{ borderRadius: '1rem', textAlign: 'center', p: '1rem' }}>
               <LocalOffer color="warning" sx={{ fontSize: '2rem', mb: '0.5rem' }} />
               <Typography variant="h4" fontWeight={700} color="warning.main">
-                {mockMyAuctions.reduce((sum, a) => sum + a.bidCount, 0)}
+                {myAuctions.reduce((sum, a) => sum + a.bidCount, 0)}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Total Bids
@@ -577,7 +830,7 @@ const MyAuctions: React.FC = () => {
             <Card sx={{ borderRadius: '1rem', textAlign: 'center', p: '1rem' }}>
               <Visibility color="info" sx={{ fontSize: '2rem', mb: '0.5rem' }} />
               <Typography variant="h4" fontWeight={700} color="info.main">
-                {mockMyAuctions.reduce((sum, a) => sum + a.views, 0)}
+                {myAuctions.reduce((sum, a) => sum + a.views, 0)}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Total Views
@@ -633,7 +886,20 @@ const MyAuctions: React.FC = () => {
             {/* Active Auctions Tab */}
             <TabPanel value={tabValue} index={0}>
               {activeAuctions.length > 0 ? (
-                renderAuctionGrid(activeAuctions)
+                <>
+                  {renderAuctionGrid(paginatedActiveAuctions)}
+                  {getTotalPages(activeAuctions.length) > 1 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: '2rem' }}>
+                      <Pagination
+                        count={getTotalPages(activeAuctions.length)}
+                        page={activePage}
+                        onChange={(event, value) => setActivePage(value)}
+                        color="primary"
+                        size="large"
+                      />
+                    </Box>
+                  )}
+                </>
               ) : (
                 <Box sx={{ textAlign: 'center', py: '3rem' }}>
                   <Gavel sx={{ fontSize: '4rem', color: 'text.secondary', mb: '1rem' }} />
@@ -650,7 +916,20 @@ const MyAuctions: React.FC = () => {
             {/* Ended Auctions Tab */}
             <TabPanel value={tabValue} index={1}>
               {endedAuctions.length > 0 ? (
-                renderAuctionGrid(endedAuctions)
+                <>
+                  {renderAuctionGrid(paginatedEndedAuctions)}
+                  {getTotalPages(endedAuctions.length) > 1 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: '2rem' }}>
+                      <Pagination
+                        count={getTotalPages(endedAuctions.length)}
+                        page={endedPage}
+                        onChange={(event, value) => setEndedPage(value)}
+                        color="primary"
+                        size="large"
+                      />
+                    </Box>
+                  )}
+                </>
               ) : (
                 <Box sx={{ textAlign: 'center', py: '3rem' }}>
                   <Cancel sx={{ fontSize: '4rem', color: 'text.secondary', mb: '1rem' }} />
@@ -667,7 +946,20 @@ const MyAuctions: React.FC = () => {
             {/* Draft Auctions Tab */}
             <TabPanel value={tabValue} index={2}>
               {draftAuctions.length > 0 ? (
-                renderAuctionGrid(draftAuctions)
+                <>
+                  {renderAuctionGrid(paginatedDraftAuctions)}
+                  {getTotalPages(draftAuctions.length) > 1 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', mt: '2rem' }}>
+                      <Pagination
+                        count={getTotalPages(draftAuctions.length)}
+                        page={draftPage}
+                        onChange={(event, value) => setDraftPage(value)}
+                        color="primary"
+                        size="large"
+                      />
+                    </Box>
+                  )}
+                </>
               ) : (
                 <Box sx={{ textAlign: 'center', py: '3rem' }}>
                   <Edit sx={{ fontSize: '4rem', color: 'text.secondary', mb: '1rem' }} />
@@ -683,17 +975,19 @@ const MyAuctions: React.FC = () => {
 
             {/* My Bids Tab */}
             <TabPanel value={tabValue} index={3}>
-              {mockUserBids.length > 0 ? (
+              {myBids.length > 0 ? (
                 <Grid container spacing={'2rem'}>
-                  {mockUserBids.map((bid) => (
+                  {myBids.map((bid) => (
                     <Grid item xs={12} sm={6} md={4} key={bid.id}>
                       <Card
+                        onClick={() => navigate(`/auction/${bid.auctionId}`)}
                         sx={{
                           height: '100%',
                           display: 'flex',
                           flexDirection: 'column',
                           borderRadius: '1rem',
                           transition: 'all 0.3s ease',
+                          cursor: 'pointer',
                           '&:hover': {
                             transform: 'translateY(-4px)',
                             boxShadow: '0 8px 25px rgba(0, 0, 0, 0.15)',
@@ -726,14 +1020,16 @@ const MyAuctions: React.FC = () => {
                             fontWeight={600}
                             sx={{
                               mb: '0.5rem',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
+                              minHeight: '4em',
                               display: '-webkit-box',
                               WebkitLineClamp: 2,
                               WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              lineHeight: 1.25,
                             }}
                           >
-                            {bid.auctionName}
+                            {bid.auctionName?.trim() || `Auction #${bid.auctionId}`}
                           </Typography>
                           <Box sx={{ mb: '0.75rem' }}>
                             <Typography variant="body2" color="text.secondary">
@@ -774,16 +1070,18 @@ const MyAuctions: React.FC = () => {
 
             {/* Won Auctions Tab */}
             <TabPanel value={tabValue} index={4}>
-              {mockWonAuctions.length > 0 ? (
+              {wonAuctions.length > 0 ? (
                 <Grid container spacing={'2rem'}>
-                  {mockWonAuctions.map((won) => (
+                  {wonAuctions.map((won) => (
                     <Grid item xs={12} sm={6} md={4} key={won.id}>
                       <Card
+                        onClick={() => navigate(`/auction/${won.itemId}`)}
                         sx={{
                           height: '100%',
                           display: 'flex',
                           flexDirection: 'column',
                           borderRadius: '1rem',
+                          cursor: 'pointer',
                           transition: 'all 0.3s ease',
                           '&:hover': {
                             transform: 'translateY(-4px)',
@@ -818,14 +1116,16 @@ const MyAuctions: React.FC = () => {
                             fontWeight={600}
                             sx={{
                               mb: '0.5rem',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
+                              minHeight: '4em',
                               display: '-webkit-box',
                               WebkitLineClamp: 2,
                               WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              lineHeight: 1.25,
                             }}
                           >
-                            {won.itemName}
+                            {won.itemName?.trim() || `Auction #${won.id}`}
                           </Typography>
                           <Box sx={{ mb: '0.75rem' }}>
                             <Typography variant="body2" color="text.secondary">
@@ -875,7 +1175,7 @@ const MyAuctions: React.FC = () => {
             </Box>
           </DialogTitle>
           <DialogContent>
-            {selectedAuction && mockBids[selectedAuction.id] && (
+            {selectedAuction && auctionBids[selectedAuction.id] && (
               <>
                 <Box sx={{ mb: '1rem', p: '1rem', backgroundColor: 'neutral.slate50', borderRadius: '0.5rem' }}>
                   <Grid container spacing={'1rem'}>
@@ -905,26 +1205,26 @@ const MyAuctions: React.FC = () => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {mockBids[selectedAuction.id].map((bid) => (
+                      {auctionBids[selectedAuction.id].map((bid, index) => (
                         <TableRow
                           key={bid.id}
                           sx={{
-                            backgroundColor: bid.isWinning ? 'success.light' : 'transparent',
-                            '&:hover': { backgroundColor: bid.isWinning ? 'success.light' : 'action.hover' }
+                            backgroundColor: index === 0 ? 'success.light' : 'transparent',
+                            '&:hover': { backgroundColor: index === 0 ? 'success.light' : 'action.hover' }
                           }}
                         >
                           <TableCell>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                               <Avatar sx={{ width: '2rem', height: '2rem', backgroundColor: 'primary.main' }}>
-                                {bid.bidderUsername.charAt(0)}
+                                {bid.bidder_username.charAt(0)}
                               </Avatar>
                               <Box>
                                 <Typography variant="body2" fontWeight={600}>
-                                  {bid.bidderUsername}
+                                  {bid.bidder_username}
                                 </Typography>
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                  <Rating value={bid.rating} readOnly size="small" />
-                                  <Typography variant="caption">{bid.rating}</Typography>
+                                  <Rating value={convertToStarRating(bid.bidder_rating)} readOnly size="small" />
+                                  <Typography variant="caption">{formatRating(bid.bidder_rating)}</Typography>
                                 </Box>
                               </Box>
                             </Box>
@@ -932,8 +1232,8 @@ const MyAuctions: React.FC = () => {
                           <TableCell>
                             <Typography
                               variant="body1"
-                              fontWeight={bid.isWinning ? 700 : 500}
-                              color={bid.isWinning ? 'success.main' : 'text.primary'}
+                              fontWeight={index === 0 ? 700 : 500}
+                              color={index === 0 ? 'success.main' : 'text.primary'}
                             >
                               ${bid.amount.toLocaleString()}
                             </Typography>
@@ -944,7 +1244,7 @@ const MyAuctions: React.FC = () => {
                             </Typography>
                           </TableCell>
                           <TableCell>
-                            {bid.isWinning && (
+                            {index === 0 && (
                               <Chip
                                 label="Winning Bid"
                                 color="success"

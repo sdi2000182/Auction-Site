@@ -1,6 +1,6 @@
 import React from 'react';
 import { ThemeProvider } from '@mui/material/styles';
-import { CssBaseline, Box } from '@mui/material';
+import { CssBaseline, Box, CircularProgress, Typography } from '@mui/material';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { theme } from './theme/theme';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -17,7 +17,7 @@ import MyAuctions from './components/MyAuctions';
 import Messages from './components/Messages';
 
 function AppContent() {
-  const { isAuthenticated, logout, user } = useAuth();
+  const { isAuthenticated, logout, user, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -28,6 +28,27 @@ function AppContent() {
   const handleLogout = () => {
     logout();
   };
+
+  // Show loading screen while checking authentication
+  if (loading) {
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '100vh',
+          backgroundColor: 'background.default'
+        }}
+      >
+        <CircularProgress size={60} sx={{ mb: 2 }} />
+        <Typography variant="h6" color="text.secondary">
+          Loading...
+        </Typography>
+      </Box>
+    );
+  }
 
   // Don't show navigation on auth page
   const showNavigation = location.pathname !== '/auth';

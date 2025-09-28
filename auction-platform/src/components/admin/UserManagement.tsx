@@ -15,6 +15,7 @@ import {
   MenuItem,
   IconButton,
   Tooltip,
+  CircularProgress,
 } from '@mui/material';
 import { DataGrid, GridColDef, GridActionsCellItem } from '@mui/x-data-grid';
 import {
@@ -30,22 +31,9 @@ import {
   LocationOn,
   Business,
 } from '@mui/icons-material';
+import { usersApi, adminApi } from '../../api';
+import type { User } from '../../api/types';
 
-interface User {
-  id: string;
-  username: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  address: string;
-  location: string;
-  country: string;
-  tin: string;
-  registrationDate: string;
-  status: 'pending' | 'approved' | 'rejected';
-  role: 'user' | 'admin';
-}
 
 const UserManagement: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -53,6 +41,8 @@ const UserManagement: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [pendingUsers, setPendingUsers] = useState<User[]>([]);
 
   // Pagination state for backend integration
   const [paginationModel, setPaginationModel] = useState({
@@ -60,78 +50,54 @@ const UserManagement: React.FC = () => {
     pageSize: 10,
   });
   const [loading, setLoading] = useState(false);
-  const [totalRows, setTotalRows] = useState(0);
 
-  // Mock user data - in real app would come from API
-  const [users, setUsers] = useState<User[]>([
-    {
-      id: '1',
-      username: 'john_doe',
-      firstName: 'John',
-      lastName: 'Doe',
-      email: 'john.doe@example.com',
-      phone: '+1 (555) 123-4567',
-      address: '123 Main St, Apt 4B',
-      location: 'New York, NY 10001',
-      country: 'United States',
-      tin: '123-45-6789',
-      registrationDate: '2024-03-15',
-      status: 'pending',
-      role: 'user',
-    },
-    {
-      id: '2',
-      username: 'jane_smith',
-      firstName: 'Jane',
-      lastName: 'Smith',
-      email: 'jane.smith@example.com',
-      phone: '+1 (555) 987-6543',
-      address: '456 Oak Ave',
-      location: 'Los Angeles, CA 90210',
-      country: 'United States',
-      tin: '987-65-4321',
-      registrationDate: '2024-03-10',
-      status: 'approved',
-      role: 'user',
-    },
-    {
-      id: '3',
-      username: 'mike_admin',
-      firstName: 'Mike',
-      lastName: 'Johnson',
-      email: 'mike.johnson@example.com',
-      phone: '+1 (555) 456-7890',
-      address: '789 Pine St',
-      location: 'Chicago, IL 60601',
-      country: 'United States',
-      tin: '456-78-9012',
-      registrationDate: '2024-02-20',
-      status: 'approved',
-      role: 'admin',
-    },
-    {
-      id: '4',
-      username: 'alice_wilson',
-      firstName: 'Alice',
-      lastName: 'Wilson',
-      email: 'alice.wilson@example.com',
-      phone: '+1 (555) 321-0987',
-      address: '321 Elm St',
-      location: 'Miami, FL 33101',
-      country: 'United States',
-      tin: '321-09-8765',
-      registrationDate: '2024-03-18',
-      status: 'rejected',
-      role: 'user',
-    },
-  ]);
+  const fetchUsers = async () => {
+    try {
+      setLoading(true);
+
+      // Fetch all users for client-side pagination and filtering
+      const [allUsers, pendingUsersList] = await Promise.all([
+        usersApi.getAllUsers(0, 1000), // Fetch a large number to get all users
+        usersApi.getPendingUsers()
+      ]);
+
+      setUsers(allUsers);
+      setPendingUsers(pendingUsersList);
+    } catch (err) {
+      console.error('Failed to fetch users:', err);
+      setAlert({ type: 'error', message: 'Failed to load users. Please try again.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []); // Only fetch on component mount
 
   const getFilteredUsers = () => {
-    return users.filter(user => {
-      const matchesStatus = filterStatus === 'all' || user.status === filterStatus;
+    // Combine all users and pending users, removing duplicates
+    const allUsersMap = new Map<number, User>();
+
+    // Add all users to the map
+    users.forEach(user => {
+      allUsersMap.set(user.id, user);
+    });
+
+    // Add pending users to the map (this will overwrite if user exists in both)
+    pendingUsers.forEach(user => {
+      allUsersMap.set(user.id, user);
+    });
+
+    const combinedUsers = Array.from(allUsersMap.values());
+
+    return combinedUsers.filter(user => {
+      // Determine user status based on the user.status field if available, otherwise use is_approved logic
+      const userStatus = user.status || (user.is_approved ? 'approved' : 'pending');
+      const matchesStatus = filterStatus === 'all' || userStatus === filterStatus;
       const matchesSearch = searchTerm === '' ||
-        user.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.last_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.username.toLowerCase().includes(searchTerm.toLowerCase());
 
@@ -139,89 +105,82 @@ const UserManagement: React.FC = () => {
     });
   };
 
-  // Update total rows when users or filters change
-  useEffect(() => {
-    const filtered = getFilteredUsers();
-    setTotalRows(filtered.length);
-  }, [users, filterStatus, searchTerm]);
 
   const handleViewUser = (user: User) => {
     setSelectedUser(user);
     setViewDialogOpen(true);
   };
 
-  const handleApproveUser = async (userId: string) => {
+  const handleApproveUser = async (userId: number) => {
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Call the backend API to approve user
+      await usersApi.approveUser({ user_id: userId, is_approved: true });
 
+      // Update local state to reflect the approval
       setUsers(prev => prev.map(user =>
-        user.id === userId ? { ...user, status: 'approved' as const } : user
+        user.id === userId ? { ...user, is_approved: true, status: 'approved' as const } : user
       ));
+      setPendingUsers(prev => prev.filter(user => user.id !== userId));
 
       setAlert({ type: 'success', message: 'User approved successfully!' });
       setTimeout(() => setAlert(null), 3000);
-    } catch (error) {
-      setAlert({ type: 'error', message: 'Failed to approve user. Please try again.' });
+    } catch (error: any) {
+      console.error('Failed to approve user:', error);
+      setAlert({ type: 'error', message: error.message || 'Failed to approve user. Please try again.' });
       setTimeout(() => setAlert(null), 3000);
     }
   };
 
-  const handleRejectUser = async (userId: string) => {
+  const handleRejectUser = async (userId: number) => {
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Call the backend API to reject user (set is_approved to false)
+      await usersApi.approveUser({ user_id: userId, is_approved: false });
 
+      // Update local state to reflect the rejection
       setUsers(prev => prev.map(user =>
-        user.id === userId ? { ...user, status: 'rejected' as const } : user
+        user.id === userId ? { ...user, is_approved: false, status: 'rejected' as const } : user
       ));
+      setPendingUsers(prev => prev.filter(user => user.id !== userId));
 
       setAlert({ type: 'success', message: 'User rejected successfully!' });
       setTimeout(() => setAlert(null), 3000);
-    } catch (error) {
-      setAlert({ type: 'error', message: 'Failed to reject user. Please try again.' });
+    } catch (error: any) {
+      console.error('Failed to reject user:', error);
+      setAlert({ type: 'error', message: error.message || 'Failed to reject user. Please try again.' });
       setTimeout(() => setAlert(null), 3000);
     }
   };
 
-  const handleExportData = (format: 'json' | 'xml') => {
-    const filteredUsers = getFilteredUsers();
+  const handleExportData = async (format: 'json' | 'xml') => {
+    try {
+      setLoading(true);
+      let blob: Blob;
 
-    if (format === 'json') {
-      const dataStr = JSON.stringify(filteredUsers, null, 2);
-      const dataBlob = new Blob([dataStr], { type: 'application/json' });
-      const url = URL.createObjectURL(dataBlob);
+      if (format === 'xml') {
+        blob = await adminApi.exportAuctionsXML();
+      } else {
+        blob = await adminApi.exportAuctionsJSON();
+      }
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'users.json';
+      link.download = `auctions.${format}`;
+      document.body.appendChild(link);
       link.click();
-    } else {
-      // XML export
-      const xmlStr = generateXML(filteredUsers);
-      const dataBlob = new Blob([xmlStr], { type: 'application/xml' });
-      const url = URL.createObjectURL(dataBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'users.xml';
-      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      setAlert({ type: 'success', message: `Data exported as ${format.toUpperCase()} successfully!` });
+    } catch (err: any) {
+      setAlert({ type: 'error', message: err.message || `Failed to export ${format.toUpperCase()} data.` });
+    } finally {
+      setLoading(false);
+      setTimeout(() => setAlert(null), 3000);
     }
-
-    setAlert({ type: 'success', message: `Data exported as ${format.toUpperCase()} successfully!` });
-    setTimeout(() => setAlert(null), 3000);
   };
 
-  const generateXML = (users: User[]) => {
-    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<users>\n';
-    users.forEach(user => {
-      xml += '  <user>\n';
-      Object.entries(user).forEach(([key, value]) => {
-        xml += `    <${key}>${value}</${key}>\n`;
-      });
-      xml += '  </user>\n';
-    });
-    xml += '</users>';
-    return xml;
-  };
 
 
   const columns: GridColDef[] = [
@@ -232,7 +191,7 @@ const UserManagement: React.FC = () => {
       sortable: false,
       renderCell: (params) => (
         <Avatar sx={{ width: '2rem', height: '2rem', backgroundColor: 'primary.main' }}>
-          {params.row.firstName.charAt(0)}{params.row.lastName.charAt(0)}
+          {params.row.first_name.charAt(0)}{params.row.last_name.charAt(0)}
         </Avatar>
       ),
     },
@@ -241,24 +200,22 @@ const UserManagement: React.FC = () => {
       field: 'fullName',
       headerName: 'Full Name',
       width: 180,
-      valueGetter: (params) => `${params.row.firstName} ${params.row.lastName}`,
+      valueGetter: (params) => `${params.row.first_name} ${params.row.last_name}`,
     },
     { field: 'email', headerName: 'Email', width: 200 },
-    {
-      field: 'registrationDate',
-      headerName: 'Registration Date',
-      width: 140,
-      valueFormatter: (params) => new Date(params.value).toLocaleDateString(),
-    },
     {
       field: 'status',
       headerName: 'Status',
       width: 120,
+      valueGetter: (params) => {
+        // Use status field if available, otherwise derive from is_approved
+        return params.row.status || (params.row.is_approved ? 'approved' : 'pending');
+      },
       renderCell: (params) => (
         <Chip
           label={params.value}
           color={
-            params.value === 'approved' ? 'success' :
+            params.value === 'approved' ? 'secondary' :
             params.value === 'pending' ? 'warning' : 'error'
           }
           size="small"
@@ -294,7 +251,7 @@ const UserManagement: React.FC = () => {
           label="View"
           onClick={() => handleViewUser(params.row)}
         />,
-        ...(params.row.status === 'pending' ? [
+        ...((!params.row.is_approved) ? [
           <GridActionsCellItem
             icon={
               <Tooltip title="Approve User">
@@ -394,8 +351,6 @@ const UserManagement: React.FC = () => {
           onPaginationModelChange={setPaginationModel}
           pageSizeOptions={[5, 10, 25, 50]}
           loading={loading}
-          rowCount={totalRows}
-          paginationMode="server"
           checkboxSelection
           disableRowSelectionOnClick
           sx={{
@@ -423,11 +378,11 @@ const UserManagement: React.FC = () => {
         <DialogTitle>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <Avatar sx={{ backgroundColor: 'primary.main' }}>
-              {selectedUser?.firstName.charAt(0)}{selectedUser?.lastName.charAt(0)}
+              {selectedUser?.first_name.charAt(0)}{selectedUser?.last_name.charAt(0)}
             </Avatar>
             <Box>
               <Typography variant="h5">
-                {selectedUser?.firstName} {selectedUser?.lastName}
+                {selectedUser?.first_name} {selectedUser?.last_name}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 @{selectedUser?.username}
@@ -469,7 +424,7 @@ const UserManagement: React.FC = () => {
                   <Business color="action" />
                   <Box>
                     <Typography variant="body2" color="text.secondary">Tax ID</Typography>
-                    <Typography variant="body1">{selectedUser?.tin}</Typography>
+                    <Typography variant="body1">{selectedUser?.afm}</Typography>
                   </Box>
                 </Box>
               </Box>

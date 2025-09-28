@@ -22,8 +22,6 @@ import { DataGrid, GridColDef, GridActionsCellItem } from '@mui/x-data-grid';
 import {
   Visibility,
   Delete,
-  Pause,
-  PlayArrow,
   Flag,
   Search,
   Download,
@@ -32,28 +30,18 @@ import {
   MonetizationOn,
   Person,
 } from '@mui/icons-material';
+import { itemsApi, adminApi } from '../../api';
+import type { ItemSummary } from '../../api/types';
 
-interface Auction {
-  id: string;
-  itemName: string;
-  seller: string;
-  sellerId: string;
-  currentBid: number;
-  startPrice: number;
-  buyNowPrice?: number;
-  startDate: string;
-  endDate: string;
-  status: 'active' | 'ended' | 'suspended' | 'draft';
-  bidCount: number;
-  category: string;
-  description: string;
-  images: string[];
-  flagged: boolean;
+// Use ItemSummary from API types, with additional fields for admin view
+type AuctionItem = ItemSummary & {
+  flagged?: boolean;
   flagReason?: string;
-}
+  description?: string; // Added for admin view dialog
+};
 
 const AuctionManagement: React.FC = () => {
-  const [selectedAuction, setSelectedAuction] = useState<Auction | null>(null);
+  const [selectedAuction, setSelectedAuction] = useState<AuctionItem | null>(null);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -65,155 +53,72 @@ const AuctionManagement: React.FC = () => {
     pageSize: 10,
   });
   const [loading, setLoading] = useState(false);
-  const [totalRows, setTotalRows] = useState(0);
+  const [auctions, setAuctions] = useState<AuctionItem[]>([]);
 
-  // Mock auction data
-  const [auctions, setAuctions] = useState<Auction[]>([
-    {
-      id: '1',
-      itemName: 'Vintage Camera Collection',
-      seller: 'John Doe',
-      sellerId: '1',
-      currentBid: 450,
-      startPrice: 100,
-      buyNowPrice: 800,
-      startDate: '2024-03-15T10:00:00Z',
-      endDate: '2024-03-22T18:00:00Z',
-      status: 'active',
-      bidCount: 12,
-      category: 'Electronics',
-      description: 'Rare collection of vintage cameras from the 1950s-1980s',
-      images: ['camera1.jpg', 'camera2.jpg'],
-      flagged: false,
-    },
-    {
-      id: '2',
-      itemName: 'Handcrafted Wooden Table',
-      seller: 'Jane Smith',
-      sellerId: '2',
-      currentBid: 280,
-      startPrice: 150,
-      startDate: '2024-03-10T09:00:00Z',
-      endDate: '2024-03-20T20:00:00Z',
-      status: 'active',
-      bidCount: 7,
-      category: 'Furniture',
-      description: 'Beautiful handcrafted oak dining table',
-      images: ['table1.jpg'],
-      flagged: true,
-      flagReason: 'Suspected counterfeit materials',
-    },
-    {
-      id: '3',
-      itemName: 'Rare Book Collection',
-      seller: 'Mike Johnson',
-      sellerId: '3',
-      currentBid: 650,
-      startPrice: 200,
-      startDate: '2024-03-01T12:00:00Z',
-      endDate: '2024-03-15T15:00:00Z',
-      status: 'ended',
-      bidCount: 23,
-      category: 'Books',
-      description: 'First edition books from famous authors',
-      images: ['books1.jpg', 'books2.jpg', 'books3.jpg'],
-      flagged: false,
-    },
-    {
-      id: '4',
-      itemName: 'Gaming Console Bundle',
-      seller: 'Alice Wilson',
-      sellerId: '4',
-      currentBid: 0,
-      startPrice: 300,
-      buyNowPrice: 500,
-      startDate: '2024-03-25T14:00:00Z',
-      endDate: '2024-04-01T14:00:00Z',
-      status: 'draft',
-      bidCount: 0,
-      category: 'Electronics',
-      description: 'Latest gaming console with accessories',
-      images: ['console1.jpg'],
-      flagged: false,
-    },
-  ]);
+  const fetchAuctions = async () => {
+    try {
+      setLoading(true);
+
+      // Fetch all active items for admin view
+      const items = await itemsApi.getActiveItems(0, 1000);
+
+      // Transform API response to match component needs
+      const transformedAuctions: AuctionItem[] = items.map(item => ({
+        ...item,
+        flagged: false, // This would come from admin-specific API if available
+        flagReason: undefined,
+      }));
+
+      setAuctions(transformedAuctions);
+    } catch (err) {
+      console.error('Failed to fetch auctions:', err);
+      setAlert({ type: 'error', message: 'Failed to load auctions. Please try again.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAuctions();
+  }, []); // Only fetch on component mount
 
   const getFilteredAuctions = () => {
     return auctions.filter(auction => {
       const matchesStatus = filterStatus === 'all' || auction.status === filterStatus;
       const matchesSearch = searchTerm === '' ||
-        auction.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        auction.seller.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        auction.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        auction.description.toLowerCase().includes(searchTerm.toLowerCase());
+        auction.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        auction.seller?.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        auction.location?.toLowerCase().includes(searchTerm.toLowerCase());
 
       return matchesStatus && matchesSearch;
     });
   };
 
-  // Update total rows when auctions or filters change
-  useEffect(() => {
-    const filtered = getFilteredAuctions();
-    setTotalRows(filtered.length);
-  }, [auctions, filterStatus, searchTerm]);
 
-  const handleViewAuction = (auction: Auction) => {
+  const handleViewAuction = (auction: AuctionItem) => {
     setSelectedAuction(auction);
     setViewDialogOpen(true);
   };
 
-  const handleSuspendAuction = async (auctionId: string) => {
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
 
-      setAuctions(prev => prev.map(auction =>
-        auction.id === auctionId ? { ...auction, status: 'suspended' as const } : auction
-      ));
-
-      setAlert({ type: 'success', message: 'Auction suspended successfully!' });
-      setTimeout(() => setAlert(null), 3000);
-    } catch (error) {
-      setAlert({ type: 'error', message: 'Failed to suspend auction.' });
-      setTimeout(() => setAlert(null), 3000);
-    }
-  };
-
-  const handleResumeAuction = async (auctionId: string) => {
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      setAuctions(prev => prev.map(auction =>
-        auction.id === auctionId ? { ...auction, status: 'active' as const } : auction
-      ));
-
-      setAlert({ type: 'success', message: 'Auction resumed successfully!' });
-      setTimeout(() => setAlert(null), 3000);
-    } catch (error) {
-      setAlert({ type: 'error', message: 'Failed to resume auction.' });
-      setTimeout(() => setAlert(null), 3000);
-    }
-  };
-
-  const handleDeleteAuction = async (auctionId: string) => {
+  const handleDeleteAuction = async (auctionId: number) => {
     if (window.confirm('Are you sure you want to delete this auction? This action cannot be undone.')) {
       try {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
+        await itemsApi.deleteItem(auctionId);
         setAuctions(prev => prev.filter(auction => auction.id !== auctionId));
-
         setAlert({ type: 'success', message: 'Auction deleted successfully!' });
         setTimeout(() => setAlert(null), 3000);
-      } catch (error) {
-        setAlert({ type: 'error', message: 'Failed to delete auction.' });
+      } catch (error: any) {
+        console.error('Failed to delete auction:', error);
+        setAlert({ type: 'error', message: error.message || 'Failed to delete auction.' });
         setTimeout(() => setAlert(null), 3000);
       }
     }
   };
 
-  const handleFlagAuction = async (auctionId: string, reason: string) => {
+  const handleFlagAuction = async (auctionId: number, reason: string) => {
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
+      // For now, just update local state since there's no flag API
       setAuctions(prev => prev.map(auction =>
         auction.id === auctionId ? { ...auction, flagged: true, flagReason: reason } : auction
       ));
@@ -231,8 +136,7 @@ const AuctionManagement: React.FC = () => {
     switch (status) {
       case 'active': return 'success';
       case 'ended': return 'default';
-      case 'suspended': return 'error';
-      case 'draft': return 'info';
+      case 'draft': return 'primary'; // Using primary color which will be slate blue
       default: return 'default';
     }
   };
@@ -252,16 +156,21 @@ const AuctionManagement: React.FC = () => {
   };
 
   const columns: GridColDef[] = [
-    { field: 'itemName', headerName: 'Item Name', width: 200 },
-    { field: 'seller', headerName: 'Seller', width: 130 },
+    { field: 'name', headerName: 'Item Name', width: 200 },
     {
-      field: 'currentBid',
+      field: 'seller',
+      headerName: 'Seller',
+      width: 130,
+      valueGetter: (params) => params.row.seller?.username || 'Unknown',
+    },
+    {
+      field: 'currently',
       headerName: 'Current Bid',
       width: 120,
       valueFormatter: (params) => `$${params.value}`,
     },
     {
-      field: 'bidCount',
+      field: 'number_of_bids',
       headerName: 'Bids',
       width: 80,
       align: 'center',
@@ -270,7 +179,7 @@ const AuctionManagement: React.FC = () => {
       field: 'timeRemaining',
       headerName: 'Time Remaining',
       width: 130,
-      valueGetter: (params) => formatTimeRemaining(params.row.endDate),
+      valueGetter: (params) => formatTimeRemaining(params.row.ends),
     },
     {
       field: 'status',
@@ -299,47 +208,15 @@ const AuctionManagement: React.FC = () => {
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
-      width: 200,
+      width: 150,
       getActions: (params) => [
         <GridActionsCellItem
-          icon={
-            <Tooltip title="View Details">
-              <Visibility />
-            </Tooltip>
-          }
+          icon={<Visibility sx={{ color: '#475569' }} />} // slate-600
           label="View"
           onClick={() => handleViewAuction(params.row)}
         />,
-        ...(params.row.status === 'active' ? [
-          <GridActionsCellItem
-            icon={
-              <Tooltip title="Suspend Auction">
-                <Pause />
-              </Tooltip>
-            }
-            label="Suspend"
-            onClick={() => handleSuspendAuction(params.row.id)}
-            sx={{ color: 'warning.main' }}
-          />,
-        ] : []),
-        ...(params.row.status === 'suspended' ? [
-          <GridActionsCellItem
-            icon={
-              <Tooltip title="Resume Auction">
-                <PlayArrow />
-              </Tooltip>
-            }
-            label="Resume"
-            onClick={() => handleResumeAuction(params.row.id)}
-            sx={{ color: 'success.main' }}
-          />,
-        ] : []),
         <GridActionsCellItem
-          icon={
-            <Tooltip title="Delete Auction">
-              <Delete />
-            </Tooltip>
-          }
+          icon={<Delete />}
           label="Delete"
           onClick={() => handleDeleteAuction(params.row.id)}
           sx={{ color: 'error.main' }}
@@ -374,9 +251,19 @@ const AuctionManagement: React.FC = () => {
             size="small"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            sx={{ minWidth: '15rem' }}
+            sx={{
+              minWidth: '15rem',
+              '& .MuiOutlinedInput-root': {
+                '&:hover .MuiOutlinedInput-notchedOutline': {
+                  borderColor: '#475569', // slate-600
+                },
+                '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                  borderColor: '#334155', // slate-700
+                },
+              },
+            }}
             InputProps={{
-              startAdornment: <Search sx={{ mr: '0.5rem', color: 'text.secondary' }} />,
+              startAdornment: <Search sx={{ mr: '0.5rem', color: '#64748b' }} />, // slate-500
             }}
           />
 
@@ -386,20 +273,58 @@ const AuctionManagement: React.FC = () => {
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
             size="small"
-            sx={{ minWidth: '10rem' }}
+            sx={{
+              minWidth: '10rem',
+              '& .MuiOutlinedInput-root': {
+                '&:hover .MuiOutlinedInput-notchedOutline': {
+                  borderColor: '#475569', // slate-600
+                },
+                '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                  borderColor: '#334155', // slate-700
+                },
+              },
+              '& .MuiInputLabel-root': {
+                '&.Mui-focused': {
+                  color: '#334155', // slate-700
+                },
+              },
+            }}
           >
             <MenuItem value="all">All Status</MenuItem>
             <MenuItem value="active">Active</MenuItem>
             <MenuItem value="ended">Ended</MenuItem>
-            <MenuItem value="suspended">Suspended</MenuItem>
             <MenuItem value="draft">Draft</MenuItem>
           </TextField>
 
           <Box sx={{ ml: 'auto', display: 'flex', gap: '0.5rem' }}>
-            <Button variant="outlined" startIcon={<Assessment />}>
+            <Button
+              variant="outlined"
+              startIcon={<Assessment />}
+              sx={{
+                borderColor: '#64748b', // slate-500
+                color: '#475569', // slate-600
+                '&:hover': {
+                  borderColor: '#334155', // slate-700
+                  backgroundColor: '#f1f5f9', // slate-50
+                  color: '#334155',
+                },
+              }}
+            >
               Analytics
             </Button>
-            <Button variant="outlined" startIcon={<Download />}>
+            <Button
+              variant="outlined"
+              startIcon={<Download />}
+              sx={{
+                borderColor: '#64748b', // slate-500
+                color: '#475569', // slate-600
+                '&:hover': {
+                  borderColor: '#334155', // slate-700
+                  backgroundColor: '#f1f5f9', // slate-50
+                  color: '#334155',
+                },
+              }}
+            >
               Export Data
             </Button>
           </Box>
@@ -415,8 +340,6 @@ const AuctionManagement: React.FC = () => {
           onPaginationModelChange={setPaginationModel}
           pageSizeOptions={[5, 10, 25, 50]}
           loading={loading}
-          rowCount={totalRows}
-          paginationMode="server"
           checkboxSelection
           disableRowSelectionOnClick
           sx={{
@@ -424,11 +347,24 @@ const AuctionManagement: React.FC = () => {
               border: 'none',
             },
             '& .MuiDataGrid-cell': {
-              borderBottom: '1px solid #f0f0f0',
+              borderBottom: '1px solid #e2e8f0', // slate-200
             },
             '& .MuiDataGrid-columnHeaders': {
-              backgroundColor: 'neutral.slate50',
-              borderBottom: '2px solid #e0e0e0',
+              backgroundColor: '#f1f5f9', // slate-50
+              borderBottom: '2px solid #cbd5e1', // slate-300
+              color: '#334155', // slate-700
+              fontWeight: 600,
+            },
+            '& .MuiDataGrid-row': {
+              '&:hover': {
+                backgroundColor: '#f8fafc', // slate-50
+              },
+            },
+            '& .MuiCheckbox-root': {
+              color: '#64748b', // slate-500
+              '&.Mui-checked': {
+                color: '#475569', // slate-600
+              },
             },
           }}
         />
@@ -441,11 +377,11 @@ const AuctionManagement: React.FC = () => {
         maxWidth="lg"
         fullWidth
       >
-        <DialogTitle>
+        <DialogTitle sx={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}> {/* slate-50, slate-200 */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <Box>
               <Typography variant="h5">
-                {selectedAuction?.itemName}
+                {selectedAuction?.name}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Auction ID: {selectedAuction?.id}
@@ -463,7 +399,14 @@ const AuctionManagement: React.FC = () => {
               <Chip
                 label={selectedAuction?.status}
                 color={getStatusColor(selectedAuction?.status || '')}
-                sx={{ fontWeight: 500, textTransform: 'capitalize' }}
+                sx={{
+                  fontWeight: 500,
+                  textTransform: 'capitalize',
+                  ...(selectedAuction?.status === 'draft' && {
+                    backgroundColor: '#475569', // slate-600
+                    color: 'white',
+                  }),
+                }}
               />
             </Box>
           </Box>
@@ -472,28 +415,34 @@ const AuctionManagement: React.FC = () => {
         <DialogContent>
           <Grid container spacing={'1.5rem'} sx={{ mt: '0.5rem' }}>
             <Grid item xs={12} md={6}>
-              <Typography variant="h6" gutterBottom>Auction Details</Typography>
+              <Typography
+                variant="h6"
+                gutterBottom
+                sx={{ color: '#334155', fontWeight: 600 }} // slate-700
+              >
+                Auction Details
+              </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <Person color="action" />
+                  <Person sx={{ color: '#64748b' }} /> {/* slate-500 */}
                   <Box>
                     <Typography variant="body2" color="text.secondary">Seller</Typography>
-                    <Typography variant="body1">{selectedAuction?.seller}</Typography>
+                    <Typography variant="body1">{selectedAuction?.seller?.username || 'Unknown'}</Typography>
                   </Box>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <MonetizationOn color="action" />
+                  <MonetizationOn sx={{ color: '#64748b' }} /> {/* slate-500 */}
                   <Box>
                     <Typography variant="body2" color="text.secondary">Current Bid</Typography>
-                    <Typography variant="body1">${selectedAuction?.currentBid}</Typography>
+                    <Typography variant="body1">${selectedAuction?.currently}</Typography>
                   </Box>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <AccessTime color="action" />
+                  <AccessTime sx={{ color: '#64748b' }} /> {/* slate-500 */}
                   <Box>
                     <Typography variant="body2" color="text.secondary">Time Remaining</Typography>
                     <Typography variant="body1">
-                      {selectedAuction ? formatTimeRemaining(selectedAuction.endDate) : 'N/A'}
+                      {selectedAuction ? formatTimeRemaining(selectedAuction.ends) : 'N/A'}
                     </Typography>
                   </Box>
                 </Box>
@@ -501,15 +450,21 @@ const AuctionManagement: React.FC = () => {
             </Grid>
 
             <Grid item xs={12} md={6}>
-              <Typography variant="h6" gutterBottom>Additional Information</Typography>
+              <Typography
+                variant="h6"
+                gutterBottom
+                sx={{ color: '#334155', fontWeight: 600 }} // slate-700
+              >
+                Additional Information
+              </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <Box>
-                  <Typography variant="body2" color="text.secondary">Category</Typography>
-                  <Typography variant="body1">{selectedAuction?.category}</Typography>
+                  <Typography variant="body2" color="text.secondary">Location</Typography>
+                  <Typography variant="body1">{selectedAuction?.location || 'Not specified'}</Typography>
                 </Box>
                 <Box>
                   <Typography variant="body2" color="text.secondary">Bid Count</Typography>
-                  <Typography variant="body1">{selectedAuction?.bidCount} bids</Typography>
+                  <Typography variant="body1">{selectedAuction?.number_of_bids} bids</Typography>
                 </Box>
                 {selectedAuction?.flagged && (
                   <Box>
@@ -523,39 +478,23 @@ const AuctionManagement: React.FC = () => {
             </Grid>
 
             <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>Description</Typography>
-              <Typography variant="body1">{selectedAuction?.description}</Typography>
+              <Typography
+                variant="h6"
+                gutterBottom
+                sx={{ color: '#334155', fontWeight: 600 }} // slate-700
+              >
+                Description
+              </Typography>
+              <Typography variant="body1">{selectedAuction?.description || 'No description available'}</Typography>
             </Grid>
           </Grid>
         </DialogContent>
 
-        <DialogActions sx={{ p: '1.5rem' }}>
-          {selectedAuction?.status === 'active' && (
-            <Button
-              variant="contained"
-              color="warning"
-              startIcon={<Pause />}
-              onClick={() => {
-                handleSuspendAuction(selectedAuction.id);
-                setViewDialogOpen(false);
-              }}
-            >
-              Suspend Auction
-            </Button>
-          )}
-          {selectedAuction?.status === 'suspended' && (
-            <Button
-              variant="contained"
-              color="success"
-              startIcon={<PlayArrow />}
-              onClick={() => {
-                handleResumeAuction(selectedAuction.id);
-                setViewDialogOpen(false);
-              }}
-            >
-              Resume Auction
-            </Button>
-          )}
+        <DialogActions sx={{
+          p: '1.5rem',
+          backgroundColor: '#f8fafc', // slate-50
+          borderTop: '1px solid #e2e8f0', // slate-200
+        }}>
           {!selectedAuction?.flagged && (
             <Button
               variant="outlined"
@@ -572,7 +511,18 @@ const AuctionManagement: React.FC = () => {
               Flag Auction
             </Button>
           )}
-          <Button onClick={() => setViewDialogOpen(false)}>Close</Button>
+          <Button
+            onClick={() => setViewDialogOpen(false)}
+            sx={{
+              color: '#475569', // slate-600
+              '&:hover': {
+                backgroundColor: '#f1f5f9', // slate-50
+                color: '#334155', // slate-700
+              },
+            }}
+          >
+            Close
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Container,
@@ -10,6 +10,8 @@ import {
   CardContent,
   Grid,
   Chip,
+  CircularProgress,
+  Alert,
 } from '@mui/material';
 import {
   People,
@@ -17,9 +19,14 @@ import {
   Assessment,
   Security,
   Dashboard,
+  Storage,
 } from '@mui/icons-material';
 import UserManagement from './UserManagement';
 import AuctionManagement from './AuctionManagement';
+import SystemSettings from './SystemSettings';
+import DataManagement from './DataManagement';
+import { adminApi } from '../../api';
+import type { AdminStatistics } from '../../api/types';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -45,20 +52,53 @@ function TabPanel(props: TabPanelProps) {
 
 const AdminPanel: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
+  const [statistics, setStatistics] = useState<AdminStatistics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
 
-  // Mock statistics - in real app would come from API
-  const stats = {
-    totalUsers: 1247,
-    pendingApprovals: 23,
-    activeAuctions: 156,
-    completedAuctions: 892,
-    totalRevenue: 45670,
-    systemHealth: 'Excellent',
+  const fetchStatistics = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await adminApi.getDetailedStatistics();
+      setStatistics(data);
+    } catch (err) {
+      console.error('Failed to fetch admin statistics:', err);
+      setError('Failed to load statistics. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    fetchStatistics();
+  }, []);
+
+  if (loading) {
+    return (
+      <Container maxWidth="xl">
+        <Box sx={{ py: '2rem', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+          <CircularProgress size={48} />
+        </Box>
+      </Container>
+    );
+  }
+
+  if (error) {
+    return (
+      <Container maxWidth="xl">
+        <Box sx={{ py: '2rem' }}>
+          <Alert severity="error" sx={{ mb: '2rem' }}>
+            {error}
+          </Alert>
+        </Box>
+      </Container>
+    );
+  }
 
   return (
     <Container maxWidth="xl">
@@ -89,14 +129,14 @@ const AdminPanel: React.FC = () => {
               <CardContent sx={{ textAlign: 'center', p: '1.5rem' }}>
                 <People sx={{ fontSize: '2.5rem', color: 'primary.main', mb: '0.5rem' }} />
                 <Typography variant="h4" component="div" gutterBottom>
-                  {stats.totalUsers.toLocaleString()}
+                  {statistics?.users.total.toLocaleString()}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Total Users
                 </Typography>
-                {stats.pendingApprovals > 0 && (
+                {statistics && statistics.users.inactive > 0 && (
                   <Chip
-                    label={`${stats.pendingApprovals} pending`}
+                    label={`${statistics.users.inactive} inactive`}
                     color="warning"
                     size="small"
                     sx={{ mt: '0.5rem' }}
@@ -109,9 +149,9 @@ const AdminPanel: React.FC = () => {
           <Grid item xs={12} sm={6} md={3}>
             <Card>
               <CardContent sx={{ textAlign: 'center', p: '1.5rem' }}>
-                <Gavel sx={{ fontSize: '2.5rem', color: 'accent.success', mb: '0.5rem' }} />
+                <Gavel sx={{ fontSize: '2.5rem', color: 'success.main', mb: '0.5rem' }} />
                 <Typography variant="h4" component="div" gutterBottom>
-                  {stats.activeAuctions}
+                  {statistics?.auctions.active}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Active Auctions
@@ -123,9 +163,9 @@ const AdminPanel: React.FC = () => {
           <Grid item xs={12} sm={6} md={3}>
             <Card>
               <CardContent sx={{ textAlign: 'center', p: '1.5rem' }}>
-                <Assessment sx={{ fontSize: '2.5rem', color: 'accent.warning', mb: '0.5rem' }} />
+                <Assessment sx={{ fontSize: '2.5rem', color: 'warning.main', mb: '0.5rem' }} />
                 <Typography variant="h4" component="div" gutterBottom>
-                  {stats.completedAuctions}
+                  {statistics?.auctions.completed}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   Completed Auctions
@@ -137,12 +177,12 @@ const AdminPanel: React.FC = () => {
           <Grid item xs={12} sm={6} md={3}>
             <Card>
               <CardContent sx={{ textAlign: 'center', p: '1.5rem' }}>
-                <Dashboard sx={{ fontSize: '2.5rem', color: 'accent.success', mb: '0.5rem' }} />
+                <Dashboard sx={{ fontSize: '2.5rem', color: 'success.main', mb: '0.5rem' }} />
                 <Typography variant="h4" component="div" gutterBottom>
-                  ${stats.totalRevenue.toLocaleString()}
+                  ${statistics?.bids.total_value.toLocaleString()}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Platform Revenue
+                  Total Bid Value
                 </Typography>
               </CardContent>
             </Card>
@@ -178,6 +218,20 @@ const AdminPanel: React.FC = () => {
                 aria-controls="admin-tabpanel-1"
                 iconPosition="start"
               />
+              {/* <Tab
+                icon={<Storage />}
+                label="Data Management"
+                id="admin-tab-2"
+                aria-controls="admin-tabpanel-2"
+                iconPosition="start"
+              />
+              <Tab
+                icon={<Security />}
+                label="System Settings"
+                id="admin-tab-3"
+                aria-controls="admin-tabpanel-3"
+                iconPosition="start"
+              /> */}
             </Tabs>
           </Box>
 
@@ -192,6 +246,15 @@ const AdminPanel: React.FC = () => {
               <AuctionManagement />
             </TabPanel>
 
+            {/* Data Management Tab */}
+            <TabPanel value={tabValue} index={2}>
+              <DataManagement />
+            </TabPanel>
+
+            {/* System Settings Tab */}
+            <TabPanel value={tabValue} index={3}>
+              <SystemSettings />
+            </TabPanel>
           </Box>
         </Paper>
       </Box>

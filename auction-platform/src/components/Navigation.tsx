@@ -226,10 +226,10 @@ const Navigation: React.FC<NavigationProps> = ({
                   <Gavel fontSize="small" />
                   My Auctions
                 </MenuItem>
-                <MenuItem onClick={handleSettings} sx={{ gap: '0.5rem' }}>
+                {/* <MenuItem onClick={handleSettings} sx={{ gap: '0.5rem' }}>
                   <Settings fontSize="small" />
                   Settings
-                </MenuItem>
+                </MenuItem> */}
                 {userRole === 'admin' && (
                   <MenuItem onClick={handleAdminPanel} sx={{ gap: '0.5rem' }}>
                     <AdminPanelSettings fontSize="small" />

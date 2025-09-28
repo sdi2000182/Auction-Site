@@ -137,27 +137,7 @@ const HomePage: React.FC = () => {
         </Grid>
 
         {/* Recommended Section Placeholder */}
-        <Box sx={{ mt: '4rem' }}>
-          <Typography variant="h2" component="h2" gutterBottom>
-            Recommended for You
-          </Typography>
-          <Typography variant="body1" color="text.secondary" sx={{ mb: '2rem' }}>
-            Discover items based on your interests and bidding history
-          </Typography>
-          <Box
-            sx={{
-              p: '2rem',
-              border: '0.125rem dashed',
-              borderColor: 'neutral.slate200',
-              borderRadius: '0.5rem',
-              backgroundColor: 'neutral.slate50',
-            }}
-          >
-            <Typography variant="body1" color="text.secondary">
-              Matrix Factorization Recommendations will appear here
-            </Typography>
-          </Box>
-        </Box>
+
       </Box>
     </Container>
   );

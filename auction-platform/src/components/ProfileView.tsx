@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Container,
@@ -28,6 +28,8 @@ import {
   CameraAlt,
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
+import { usersApi } from '../api';
+import type { UserUpdate } from '../api/types';
 
 interface ProfileData {
   username: string;
@@ -38,32 +40,67 @@ interface ProfileData {
   address: string;
   location: string;
   country: string;
-  tin: string;
+  afm: string;
   avatar?: string;
 }
 
 const ProfileView: React.FC = () => {
-  const { user } = useAuth();
+  const { user, checkAuthStatus } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [profileLoading, setProfileLoading] = useState(true);
 
-  // Mock profile data - in real app this would come from API
   const [profileData, setProfileData] = useState<ProfileData>({
-    username: user?.username || 'john_doe',
-    firstName: user?.firstName || 'John',
-    lastName: user?.lastName || 'Doe',
-    email: user?.email || 'john.doe@example.com',
-    phone: '+1 (555) 123-4567',
-    address: '123 Main Street, Apt 4B',
-    location: 'New York, NY 10001',
-    country: 'United States',
-    tin: '123-45-6789',
+    username: '',
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    address: '',
+    location: '',
+    country: '',
+    afm: '',
     avatar: undefined,
   });
 
   const [editData, setEditData] = useState<ProfileData>({ ...profileData });
+
+  // Load user profile data
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user) return;
+
+      try {
+        setProfileLoading(true);
+        const userData = await usersApi.getCurrentUserProfile();
+
+        const transformedProfile: ProfileData = {
+          username: userData.username,
+          firstName: userData.first_name,
+          lastName: userData.last_name,
+          email: userData.email,
+          phone: userData.phone || '',
+          address: userData.address || '',
+          location: userData.location || '',
+          country: userData.country || '',
+          afm: userData.afm || '',
+          avatar: undefined,
+        };
+
+        setProfileData(transformedProfile);
+        setEditData(transformedProfile);
+      } catch (err: any) {
+        console.error('Failed to load profile:', err);
+        setError('Failed to load profile data');
+      } finally {
+        setProfileLoading(false);
+      }
+    };
+
+    loadProfile();
+  }, [user]);
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -83,9 +120,6 @@ const ProfileView: React.FC = () => {
     setError('');
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
       // Basic validation
       if (!editData.firstName || !editData.lastName || !editData.email) {
         setError('First name, last name, and email are required.');
@@ -100,12 +134,46 @@ const ProfileView: React.FC = () => {
         setIsLoading(false);
         return;
       }
+      console.log('EDIT DATA:', editData);
+      // Transform data to API format
+      const updateData: UserUpdate = {
+        first_name: editData.firstName,
+        last_name: editData.lastName,
+        email: editData.email,
+        phone: editData.phone || undefined,
+        address: editData.address || undefined,
+        location: editData.location || undefined,
+        country: editData.country || undefined,
+        afm: editData.afm || undefined,
+      };
 
-      setProfileData({ ...editData });
+      // Call API to update profile
+      const updatedUser = await usersApi.updateCurrentUser(updateData);
+
+      // Update local state with API response
+      const updatedProfile: ProfileData = {
+        username: updatedUser.username,
+        firstName: updatedUser.first_name,
+        lastName: updatedUser.last_name,
+        email: updatedUser.email,
+        phone: updatedUser.phone || '',
+        address: updatedUser.address || '',
+        location: updatedUser.location || '',
+        country: updatedUser.country || '',
+        afm: updatedUser.afm || '',
+        avatar: undefined,
+      };
+
+      setProfileData(updatedProfile);
+      setEditData(updatedProfile);
       setIsEditing(false);
       setSuccess('Profile updated successfully!');
-    } catch (error) {
-      setError('Failed to update profile. Please try again.');
+
+      // Refresh auth context to reflect changes
+      await checkAuthStatus();
+    } catch (err: any) {
+      console.error('Failed to update profile:', err);
+      setError(err.message || 'Failed to update profile. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -170,6 +238,20 @@ const ProfileView: React.FC = () => {
       </Box>
     );
   };
+
+  // Show loading state while profile is loading
+  if (profileLoading) {
+    return (
+      <Container maxWidth="lg">
+        <Box sx={{ py: '2rem', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
+          <CircularProgress size={60} />
+          <Typography variant="h6" sx={{ ml: '1rem' }}>
+            Loading profile...
+          </Typography>
+        </Box>
+      </Container>
+    );
+  }
 
   return (
     <Container maxWidth="lg">
@@ -314,7 +396,7 @@ const ProfileView: React.FC = () => {
                 </Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                   {renderField('Phone Number', profileData.phone, 'phone', <Phone color="action" />)}
-                  {renderField('Tax ID (ΑΦΜ)', profileData.tin, 'tin', <Business color="action" />)}
+                  {renderField('Tax ID (ΑΦΜ)', profileData.afm, 'afm', <Business color="action" />)}
                   {renderField('Address', profileData.address, 'address', <LocationOn color="action" />)}
                   {renderField('Location', profileData.location, 'location', <LocationOn color="action" />)}
                   {renderField('Country', profileData.country, 'country', <LocationOn color="action" />)}

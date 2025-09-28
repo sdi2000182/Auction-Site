@@ -91,12 +91,23 @@ export default function AuthForm({ onSuccess }: AuthFormProps = {}) {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setError('');
+
+    // Basic validation
+    if (!loginData.username || !loginData.password) {
+      setError('Please enter both username and password.');
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const success = await login(loginData.username, loginData.password);
-      if (success) onSuccess?.();
-      else setError('Invalid username or password.');
-    } catch {
-      setError('Login failed. Please try again.');
+      if (success) {
+        onSuccess?.();
+      }
+    } catch (error: any) {
+      console.error('Login error:', error);
+      setError(error.message || 'Login failed. Please check your credentials and try again.');
     } finally {
       setIsLoading(false);
     }
@@ -105,17 +116,61 @@ export default function AuthForm({ onSuccess }: AuthFormProps = {}) {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    if (registerData.password !== registerData.confirmPassword) {
-      setError('Passwords do not match');
+    setError('');
+    setShowSuccess(false);
+
+    // Enhanced validation
+    if (!registerData.username || !registerData.password || !registerData.confirmPassword ||
+        !registerData.firstName || !registerData.lastName || !registerData.email ||
+        !registerData.phone || !registerData.address || !registerData.location ||
+        !registerData.country || !registerData.tin) {
+      setError('Please fill in all required fields.');
       setIsLoading(false);
       return;
     }
+
+    if (registerData.password !== registerData.confirmPassword) {
+      setError('Passwords do not match.');
+      setIsLoading(false);
+      return;
+    }
+
+    if (registerData.password.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      setIsLoading(false);
+      return;
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(registerData.email)) {
+      setError('Please enter a valid email address.');
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const success = await register(registerData);
-      if (success) setShowSuccess(true);
-      else setError('Registration failed. Please try again.');
-    } catch {
-      setError('Registration failed. Please try again.');
+      if (success) {
+        setShowSuccess(true);
+        // Clear form data on successful registration
+        setRegisterData({
+          username: '',
+          password: '',
+          confirmPassword: '',
+          firstName: '',
+          lastName: '',
+          email: '',
+          phone: '',
+          address: '',
+          location: '',
+          country: '',
+          tin: '',
+        });
+      }
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      setError(error.message || 'Registration failed. Please check your information and try again.');
     } finally {
       setIsLoading(false);
     }
@@ -264,7 +319,11 @@ export default function AuthForm({ onSuccess }: AuthFormProps = {}) {
 
           {/* Register Tab */}
           <TabPanel value={tabValue} index={1}>
-            {showSuccess && <Alert severity="success" sx={{ mb: 2 }}>Registration successful! Pending admin approval.</Alert>}
+            {showSuccess && (
+              <Alert severity="success" sx={{ mb: 2 }}>
+                Registration successful! Your account is pending admin approval. You will be notified once approved.
+              </Alert>
+            )}
             {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
             <Box

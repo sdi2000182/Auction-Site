@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Container,
@@ -10,49 +11,88 @@ import {
   CardMedia,
   Chip,
   Alert,
+  CircularProgress,
 } from '@mui/material';
 import {
   AccessTime,
   Visibility,
   Login,
 } from '@mui/icons-material';
+import { itemsApi } from '../api';
+import type { Item } from '../api/types';
 
-// Mock auction data for visitor mode
-const mockAuctions = [
-  {
-    id: 1,
-    name: 'Vintage Camera Collection',
-    currentPrice: 450,
-    timeLeft: '2d 14h 23m',
-    bids: 12,
-    image: 'https://via.placeholder.com/400x200?text=Vintage+Camera',
-    categories: ['Electronics', 'Vintage'],
-  },
-  {
-    id: 2,
-    name: 'Handcrafted Wooden Table',
-    currentPrice: 280,
-    timeLeft: '1d 8h 45m',
-    bids: 7,
-    image: 'https://via.placeholder.com/400x200?text=Wooden+Table',
-    categories: ['Furniture', 'Handmade'],
-  },
-  {
-    id: 3,
-    name: 'Rare Book Collection',
-    currentPrice: 150,
-    timeLeft: '4h 12m',
-    bids: 23,
-    image: 'https://via.placeholder.com/400x200?text=Book+Collection',
-    categories: ['Books', 'Collectibles'],
-  },
-];
+interface VisitorAuction {
+  id: number;
+  name: string;
+  currentPrice: number;
+  timeLeft: string;
+  bids: number;
+  image: string;
+  categories: string[];
+}
 
 interface VisitorModeProps {
   onLoginClick: () => void;
 }
 
 const VisitorMode: React.FC<VisitorModeProps> = ({ onLoginClick }) => {
+  const navigate = useNavigate();
+  const [auctions, setAuctions] = useState<VisitorAuction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load featured auctions for visitors
+  useEffect(() => {
+    const loadFeaturedAuctions = async () => {
+      try {
+        setLoading(true);
+        // Get active auctions, limited to 6 for featured display
+        const result = await itemsApi.searchItems({
+          status: 'active',
+          page: 1,
+          size: 6
+        });
+
+        // Transform API data to visitor format
+        const transformedAuctions: VisitorAuction[] = result.items.map(item => {
+          // Calculate time remaining
+          const endTime = new Date(item.ends);
+          const now = new Date();
+          const timeDiff = endTime.getTime() - now.getTime();
+
+          let timeLeft = 'Ended';
+          if (timeDiff > 0) {
+            const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
+            timeLeft = `${days}d ${hours}h ${minutes}m`;
+          }
+
+          return {
+            id: item.id,
+            name: item.name,
+            currentPrice: item.currently || item.first_bid || 0,
+            timeLeft,
+            bids: item.number_of_bids || 0,
+            image: item.images && item.images.length > 0
+              ? item.images[0]
+              : `https://picsum.photos/400/200?random=${item.id}`,
+            categories: item.categories.map(cat => cat.name)
+          };
+        });
+
+        setAuctions(transformedAuctions);
+      } catch (err: any) {
+        console.error('Failed to load featured auctions:', err);
+        setError('Failed to load featured auctions');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadFeaturedAuctions();
+  }, []);
+
   return (
     <Box sx={{ width: '100%' }}>
       <Container maxWidth="lg">
@@ -74,38 +114,68 @@ const VisitorMode: React.FC<VisitorModeProps> = ({ onLoginClick }) => {
           Featured Auctions
         </Typography>
 
+        {/* Loading State */}
+        {loading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '20rem' }}>
+            <CircularProgress size={60} />
+            <Typography variant="h6" sx={{ ml: '1rem' }}>
+              Loading featured auctions...
+            </Typography>
+          </Box>
+        )}
+
+        {/* Error State */}
+        {error && (
+          <Alert severity="error" sx={{ mb: '2rem' }}>
+            {error}
+          </Alert>
+        )}
+
+        {/* Auctions Grid */}
+        {!loading && !error && (
         <Grid container spacing={'2rem'}>
-          {mockAuctions.map((auction) => (
+          {auctions.map((auction) => (
             <Grid item xs={12} md={4} key={auction.id}>
               <Card
                 sx={{
-                  height: '25rem',
+                  height: '28rem',
                   display: 'flex',
                   flexDirection: 'column',
                   cursor: 'pointer',
+                  overflow: 'hidden',
                   '&:hover': {
                     transform: 'translateY(-0.25rem)',
                     boxShadow: '0 0.5rem 1.5rem rgba(0, 0, 0, 0.15)',
                   },
                 }}
+                onClick={() => navigate(`/auction/${auction.id}`)}
               >
                 <CardMedia
-                  component="div"
+                  component="img"
                   sx={{
                     height: '12.5rem',
-                    backgroundColor: 'neutral.slate200',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    objectFit: 'cover',
+                    flexShrink: 0,
                   }}
-                >
-                  <Typography variant="body2" color="text.secondary">
-                    {auction.name}
-                  </Typography>
-                </CardMedia>
+                  image={auction.image}
+                  alt={auction.name}
+                />
 
-                <CardContent sx={{ flexGrow: 1, p: '1.5rem' }}>
-                  <Typography variant="h4" component="h3" gutterBottom>
+                <CardContent sx={{ flexGrow: 1, p: '1.5rem', display: 'flex', flexDirection: 'column' }}>
+                  <Typography
+                    variant="h6"
+                    component="h3"
+                    gutterBottom
+                    sx={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      fontWeight: 600,
+                      lineHeight: 1.3,
+                    }}
+                  >
                     {auction.name}
                   </Typography>
 
@@ -133,7 +203,7 @@ const VisitorMode: React.FC<VisitorModeProps> = ({ onLoginClick }) => {
                         Current Price
                       </Typography>
                       <Typography variant="h3" color="primary.main">
-                        ${auction.currentPrice}
+                        ${Math.round(auction.currentPrice)}
                       </Typography>
                     </Box>
                     <Box sx={{ textAlign: 'right' }}>
@@ -160,8 +230,11 @@ const VisitorMode: React.FC<VisitorModeProps> = ({ onLoginClick }) => {
                     variant="outlined"
                     fullWidth
                     startIcon={<Login />}
-                    onClick={onLoginClick}
-                    sx={{ mt: 'auto' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onLoginClick();
+                    }}
+                    sx={{ mt: 'auto', flexShrink: 0 }}
                   >
                     Login to Bid
                   </Button>
@@ -170,6 +243,7 @@ const VisitorMode: React.FC<VisitorModeProps> = ({ onLoginClick }) => {
             </Grid>
           ))}
         </Grid>
+        )}
 
         </Box>
       </Container>

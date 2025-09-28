@@ -20,6 +20,8 @@ import {
   Pagination,
   IconButton,
   Tooltip,
+  CircularProgress,
+  Alert,
 } from '@mui/material';
 import {
   Search,
@@ -32,12 +34,18 @@ import {
   FavoriteBorder,
   Category,
 } from '@mui/icons-material';
+import { itemsApi, categoriesApi } from '../api';
+import type { ItemSummary, Category as ApiCategory, SearchResult } from '../api/types';
+import { getErrorMessage } from '../utils/errorHandling';
+import RecommendedAuctions from './RecommendedAuctions';
+import { useAuth } from '../context/AuthContext';
+import { getAuctionImage, getAuctionImages } from '../utils/imageUtils';
 
 interface AuctionItem {
-  id: string;
+  id: number;
   itemName: string;
   seller: string;
-  sellerId: string;
+  sellerId: number;
   currentBid: number;
   startPrice: number;
   buyNowPrice?: number;
@@ -55,29 +63,16 @@ interface AuctionItem {
 
 interface Filters {
   searchTerm: string;
-  selectedCategories: string[];
+  selectedCategories: number[];
   priceMin: string;
   priceMax: string;
   location: string;
 }
 
-const categories = [
-  'Electronics',
-  'Fashion',
-  'Home & Garden',
-  'Collectibles',
-  'Vehicles',
-  'Art',
-  'Books',
-  'Music',
-  'Sports',
-  'Jewelry',
-  'Tools',
-  'Antiques'
-];
 
 const AuctionBrowse: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [filters, setFilters] = useState<Filters>({
     searchTerm: '',
     selectedCategories: [],
@@ -87,174 +82,218 @@ const AuctionBrowse: React.FC = () => {
   });
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [watchlist, setWatchlist] = useState<string[]>([]);
+  const [watchlist, setWatchlist] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
-  const itemsPerPage = 9;
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<ApiCategory[]>([]);
+  const [auctions, setAuctions] = useState<AuctionItem[]>([]);
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
+  const itemsPerPage = 12;
 
-  // Mock auction data
-  const [auctions] = useState<AuctionItem[]>([
-    {
-      id: '1',
-      itemName: 'Vintage Camera Collection',
-      seller: 'John Doe',
-      sellerId: '1',
-      currentBid: 450,
-      startPrice: 100,
-      buyNowPrice: 800,
-      startDate: '2024-03-15T10:00:00Z',
-      endDate: '2024-03-22T18:00:00Z',
-      status: 'active',
-      bidCount: 12,
-      category: 'Electronics',
-      description: 'Rare collection of vintage cameras from the 1950s-1980s',
-      images: ['https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=400'],
-      location: 'New York, NY',
-      country: 'United States',
-      timeRemaining: '5d 12h 30m'
-    },
-    {
-      id: '2',
-      itemName: 'Designer Leather Handbag',
-      seller: 'Jane Smith',
-      sellerId: '2',
-      currentBid: 280,
-      startPrice: 150,
-      buyNowPrice: 450,
-      startDate: '2024-03-16T14:00:00Z',
-      endDate: '2024-03-23T20:00:00Z',
-      status: 'active',
-      bidCount: 8,
-      category: 'Fashion',
-      description: 'Authentic designer leather handbag in excellent condition',
-      images: ['https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=400'],
-      location: 'Los Angeles, CA',
-      country: 'United States',
-      timeRemaining: '6d 8h 15m'
-    },
-    {
-      id: '3',
-      itemName: 'Antique Wooden Desk',
-      seller: 'Mike Johnson',
-      sellerId: '3',
-      currentBid: 320,
-      startPrice: 200,
-      startDate: '2024-03-14T09:00:00Z',
-      endDate: '2024-03-21T15:00:00Z',
-      status: 'active',
-      bidCount: 15,
-      category: 'Home & Garden',
-      description: 'Beautiful antique oak desk with intricate carvings',
-      images: ['https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=400'],
-      location: 'Chicago, IL',
-      country: 'United States',
-      timeRemaining: '4d 3h 45m'
-    },
-    {
-      id: '4',
-      itemName: 'Gaming Console Bundle',
-      seller: 'Alex Brown',
-      sellerId: '4',
-      currentBid: 520,
-      startPrice: 300,
-      buyNowPrice: 750,
-      startDate: '2024-03-17T16:00:00Z',
-      endDate: '2024-03-24T22:00:00Z',
-      status: 'active',
-      bidCount: 22,
-      category: 'Electronics',
-      description: 'Latest gaming console with accessories and games',
-      images: ['https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=400'],
-      location: 'Austin, TX',
-      country: 'United States',
-      timeRemaining: '7d 10h 20m'
-    },
-    {
-      id: '5',
-      itemName: 'Vintage Art Print',
-      seller: 'Sarah Wilson',
-      sellerId: '5',
-      currentBid: 180,
-      startPrice: 50,
-      startDate: '2024-03-13T11:00:00Z',
-      endDate: '2024-03-20T17:00:00Z',
-      status: 'active',
-      bidCount: 7,
-      category: 'Art',
-      description: 'Original vintage art print from the 1960s',
-      images: ['https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=400'],
-      location: 'Seattle, WA',
-      country: 'United States',
-      timeRemaining: '3d 5h 10m'
-    },
-    {
-      id: '6',
-      itemName: 'Professional Camera Lens',
-      seller: 'Tom Davis',
-      sellerId: '6',
-      currentBid: 650,
-      startPrice: 400,
-      buyNowPrice: 900,
-      startDate: '2024-03-18T08:00:00Z',
-      endDate: '2024-03-25T14:00:00Z',
-      status: 'active',
-      bidCount: 18,
-      category: 'Electronics',
-      description: 'High-quality professional camera lens in mint condition',
-      images: ['https://images.unsplash.com/photo-1502920917128-1aa500764cbd?w=400'],
-      location: 'Miami, FL',
-      country: 'United States',
-      timeRemaining: '8d 2h 35m'
+  // Fetch initial data and search auctions
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        setInitialLoading(true);
+        setError(null);
+
+        const categoriesData = await categoriesApi.getAllCategories();
+        setCategories(categoriesData);
+
+        // Initial search with no filters to get active items
+        await searchAuctions();
+      } catch (err: any) {
+        console.error('Failed to fetch initial data:', err);
+        setError('Failed to load auctions. Please try again.');
+      } finally {
+        setInitialLoading(false);
+      }
+    };
+
+    fetchInitialData();
+  }, []);
+
+  // Search auctions when filters change
+  useEffect(() => {
+    if (!initialLoading) {
+      const debounceTimer = setTimeout(() => {
+        searchAuctions();
+        setCurrentPage(1);
+      }, 500);
+
+      return () => clearTimeout(debounceTimer);
     }
-  ]);
+  }, [filters]);
 
-  const getFilteredAuctions = () => {
-    return auctions.filter(auction => {
-      // Search term filter
-      const matchesSearch = !filters.searchTerm ||
-        auction.itemName.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-        auction.description.toLowerCase().includes(filters.searchTerm.toLowerCase()) ||
-        auction.seller.toLowerCase().includes(filters.searchTerm.toLowerCase());
+  // Search auctions when page changes
+  useEffect(() => {
+    if (!initialLoading) {
+      searchAuctions();
+    }
+  }, [currentPage]);
 
-      // Category filter
-      const matchesCategory = filters.selectedCategories.length === 0 ||
-        filters.selectedCategories.includes(auction.category);
+  const searchAuctions = async () => {
+    try {
+      setLoading(true);
+      setError(null);
 
-      // Price filter
-      const matchesPrice = (!filters.priceMin || auction.currentBid >= parseInt(filters.priceMin)) &&
-        (!filters.priceMax || auction.currentBid <= parseInt(filters.priceMax));
+      let allResults: any[] = [];
+      let totalItems = 0;
+      let totalPages = 1;
 
-      // Location filter
-      const matchesLocation = !filters.location ||
-        auction.location.toLowerCase().includes(filters.location.toLowerCase()) ||
-        auction.country.toLowerCase().includes(filters.location.toLowerCase());
+      if (filters.selectedCategories.length <= 1) {
+        // Single or no category - use server-side pagination
+        const searchParams = {
+          query: filters.searchTerm || undefined,
+          category_id: filters.selectedCategories.length > 0 ? filters.selectedCategories[0] : undefined,
+          min_price: filters.priceMin ? parseFloat(filters.priceMin) : undefined,
+          max_price: filters.priceMax ? parseFloat(filters.priceMax) : undefined,
+          location: filters.location || undefined,
+          status: 'active' as const,
+          page: currentPage,
+          size: itemsPerPage,
+        };
 
-      return matchesSearch && matchesCategory && matchesPrice && matchesLocation;
-    });
+        const result = await itemsApi.searchItems(searchParams);
+        allResults = result.items;
+        totalItems = result.total;
+        totalPages = result.pages;
+      } else {
+        // Multiple categories - fetch more items to handle client-side pagination better
+        const promises = filters.selectedCategories.map(categoryId =>
+          itemsApi.searchItems({
+            query: filters.searchTerm || undefined,
+            category_id: categoryId,
+            min_price: filters.priceMin ? parseFloat(filters.priceMin) : undefined,
+            max_price: filters.priceMax ? parseFloat(filters.priceMax) : undefined,
+            location: filters.location || undefined,
+            status: 'active' as const,
+            page: 1,
+            size: 500, // Get more items to ensure we have enough for pagination
+          })
+        );
+
+        const results = await Promise.all(promises);
+
+        // Merge all results and remove duplicates
+        const allItems = results.flatMap(result => result.items);
+        const uniqueItems = allItems.filter((item, index, self) =>
+          index === self.findIndex(i => i.id === item.id)
+        );
+
+        // Sort by relevance (newer items first, then by bid count)
+        uniqueItems.sort((a, b) => {
+          // First prioritize by ID (assuming higher ID = newer)
+          if (b.id !== a.id) {
+            return b.id - a.id;
+          }
+          // Then by number of bids (more popular items first)
+          return b.number_of_bids - a.number_of_bids;
+        });
+
+        // Implement client-side pagination
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        allResults = uniqueItems.slice(startIndex, endIndex);
+        totalItems = uniqueItems.length;
+        totalPages = Math.ceil(totalItems / itemsPerPage);
+      }
+
+      setSearchResult({
+        items: allResults,
+        total: totalItems,
+        page: currentPage,
+        size: itemsPerPage,
+        pages: totalPages
+      });
+
+      // Transform API data to component format
+      const transformedItems: AuctionItem[] = allResults.map(item => {
+        console.log('Transforming item:', item.id, 'name:', item.name); // Debug log
+        return {
+          id: item.id,
+          itemName: item.name?.trim() || `Auction #${item.id}`,
+          seller: item.seller?.username || 'Unknown Seller',
+          sellerId: item.seller?.id || 0,
+          currentBid: item.currently,
+          startPrice: item.currently, // API doesn't have starting price separate
+          buyNowPrice: undefined, // Not in search results
+          startDate: new Date().toISOString(), // Not in search results
+          endDate: item.ends,
+          status: item.status,
+          bidCount: item.number_of_bids,
+          category: item.categories.length > 0 ? item.categories[0].name : 'Uncategorized',
+          description: '', // Not in search results
+          images: getAuctionImages(item.images || [], item.categories, item.id),
+          location: item.location || 'Unknown',
+          country: '', // Not in search results
+          timeRemaining: formatTimeRemaining(item.ends),
+        };
+      });
+
+      setAuctions(transformedItems);
+    } catch (err: any) {
+      console.error('Failed to search auctions:', err);
+      setError(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const filteredAuctions = getFilteredAuctions();
-  const totalPages = Math.ceil(filteredAuctions.length / itemsPerPage);
-  const paginatedAuctions = filteredAuctions.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
+  const formatTimeRemaining = (endDate: string): string => {
+    // Handle null or undefined endDate
+    if (!endDate) {
+      return 'No end date';
+    }
+
+    const now = new Date();
+    const end = new Date(endDate);
+
+    // Check if date is valid
+    if (isNaN(end.getTime()) || isNaN(now.getTime())) {
+      return 'Invalid date';
+    }
+
+    const diff = end.getTime() - now.getTime();
+
+    if (diff <= 0) return 'Ended';
+
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+    // Validate calculations
+    if (isNaN(days) || isNaN(hours) || isNaN(minutes)) {
+      return 'Invalid time';
+    }
+
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  };
+
+  // Use search results directly (server-side filtering)
+  const filteredAuctions = auctions;
+  const totalPages = searchResult ? searchResult.pages : 1;
+  const paginatedAuctions = auctions; // Already paginated by server
 
   const handleFilterChange = (key: keyof Filters, value: string | string[]) => {
     setFilters(prev => ({ ...prev, [key]: value }));
     setCurrentPage(1); // Reset to first page when filters change
   };
 
-  const handleCategoryToggle = (category: string) => {
+  const handleCategoryToggle = (categoryId: number) => {
     setFilters(prev => ({
       ...prev,
-      selectedCategories: prev.selectedCategories.includes(category)
-        ? prev.selectedCategories.filter(c => c !== category)
-        : [...prev.selectedCategories, category]
+      selectedCategories: prev.selectedCategories.includes(categoryId)
+        ? prev.selectedCategories.filter(c => c !== categoryId)
+        : [...prev.selectedCategories, categoryId] // Allow multiple category selection
     }));
     setCurrentPage(1);
   };
 
-  const toggleWatchlist = (auctionId: string) => {
+  const toggleWatchlist = (auctionId: number) => {
     setWatchlist(prev =>
       prev.includes(auctionId)
         ? prev.filter(id => id !== auctionId)
@@ -272,6 +311,17 @@ const AuctionBrowse: React.FC = () => {
     });
     setCurrentPage(1);
   };
+
+  if (initialLoading) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <CircularProgress size={60} />
+        <Typography variant="h6" sx={{ ml: '1rem' }}>
+          Loading auctions...
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ minHeight: '100vh', backgroundColor: 'neutral.slate50' }}>
@@ -329,15 +379,15 @@ const AuctionBrowse: React.FC = () => {
             <FormGroup>
               {categories.map((category) => (
                 <FormControlLabel
-                  key={category}
+                  key={category.id}
                   control={
                     <Checkbox
-                      checked={filters.selectedCategories.includes(category)}
-                      onChange={() => handleCategoryToggle(category)}
+                      checked={filters.selectedCategories.includes(category.id)}
+                      onChange={() => handleCategoryToggle(category.id)}
                       size="small"
                     />
                   }
-                  label={category}
+                  label={category.name}
                   sx={{
                     mb: '0.5rem',
                     '& .MuiFormControlLabel-label': { fontWeight: 400 }
@@ -405,29 +455,62 @@ const AuctionBrowse: React.FC = () => {
               Browse Auctions
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              {filteredAuctions.length} auctions found
+              {searchResult ? `${searchResult.total} auctions found (page ${searchResult.page} of ${searchResult.pages})` : `${filteredAuctions.length} auctions found`}
             </Typography>
           </Box>
         </Box>
 
+        {/* Recommendations Section */}
+        {user && (
+          <Box sx={{ mb: '3rem' }}>
+            <RecommendedAuctions type="personal" limit={10} />
+            <RecommendedAuctions type="category" limit={10} />
+          </Box>
+        )}
+
+        {/* Trending for non-logged-in users */}
+        {!user && (
+          <Box sx={{ mb: '3rem' }}>
+            <RecommendedAuctions type="trending" limit={6} />
+          </Box>
+        )}
+
+        {/* Loading indicator */}
+        {loading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', py: '4rem' }}>
+            <CircularProgress size={40} />
+            <Typography variant="body1" sx={{ ml: '1rem' }}>
+              Loading auctions...
+            </Typography>
+          </Box>
+        )}
+
+        {/* Error message */}
+        {error && (
+          <Alert severity="error" sx={{ mb: '2rem' }}>
+            {error}
+          </Alert>
+        )}
+
         {/* Auction Grid */}
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: {
-              xs: '1fr',
-              sm: 'repeat(2, 1fr)',
-              md: 'repeat(3, 1fr)',
-              lg: 'repeat(4, 1fr)'
-            },
-            gap: '24px',
-            justifyItems: 'center',
-            mb: '2rem',
-            width: '100%'
-          }}
-        >
-          {/* Auction Cards */}
-          {paginatedAuctions.map((auction) => (
+        {!loading && !error && (
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: {
+                xs: '1fr',
+                sm: 'repeat(2, 1fr)',
+                md: 'repeat(3, 1fr)',
+                lg: 'repeat(4, 1fr)'
+              },
+              gap: '24px',
+              justifyItems: 'center',
+              mb: '2rem',
+              width: '100%'
+            }}
+          >
+            {/* Auction Cards */}
+            {paginatedAuctions.map((auction) => (
             <Card
               key={auction.id}
               onClick={() => navigate(`/auction/${auction.id}`)}
@@ -504,15 +587,16 @@ const AuctionBrowse: React.FC = () => {
                     fontWeight={600}
                     sx={{
                       mb: '0.5rem',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
+                      minHeight: '4em',
                       display: '-webkit-box',
                       WebkitLineClamp: 2,
                       WebkitBoxOrient: 'vertical',
-                      lineHeight: 1.3,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      lineHeight: 1.25,
                     }}
                   >
-                    {auction.itemName}
+                    {auction.itemName?.trim() || `Auction #${auction.id}`}
                   </Typography>
 
                   {/* Current Bid */}
@@ -569,11 +653,12 @@ const AuctionBrowse: React.FC = () => {
                   </Button>
                 </CardContent>
               </Card>
-          ))}
-        </Box>
+            ))}
+          </Box>
+        )}
 
         {/* Pagination */}
-        {filteredAuctions.length > 0 && (
+        {!loading && !error && filteredAuctions.length > 0 && totalPages > 1 && (
           <Box sx={{ display: 'flex', justifyContent: 'center', mt: '2rem' }}>
             <Pagination
               count={Math.max(1, totalPages)}
@@ -583,13 +668,12 @@ const AuctionBrowse: React.FC = () => {
               size="large"
               showFirstButton
               showLastButton
-              disabled={totalPages <= 1}
             />
           </Box>
         )}
 
         {/* No Results */}
-        {filteredAuctions.length === 0 && (
+        {!loading && !error && filteredAuctions.length === 0 && (
           <Box
             sx={{
               textAlign: 'center',
